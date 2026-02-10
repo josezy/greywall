@@ -1,5 +1,3 @@
-![Greywall Banner](assets/greywall-banner.png)
-
 # Greywall
 
 **The sandboxing layer of the GreyHaven platform.**
