@@ -211,18 +211,18 @@ func TestMacOS_NetworkBlocksNc(t *testing.T) {
 	assertBlocked(t, result)
 }
 
-// TestMacOS_ProxyAllowsAllowedDomains verifies the proxy allows configured domains.
-func TestMacOS_ProxyAllowsAllowedDomains(t *testing.T) {
+// TestMacOS_ProxyAllowsTrafficViaProxy verifies the proxy allows traffic via external proxy.
+func TestMacOS_ProxyAllowsTrafficViaProxy(t *testing.T) {
 	skipIfAlreadySandboxed(t)
 	skipIfCommandNotFound(t, "curl")
 
 	workspace := createTempWorkspace(t)
-	cfg := testConfigWithNetwork("httpbin.org")
+	cfg := testConfigWithProxy("socks5://localhost:1080")
 	cfg.Filesystem.AllowWrite = []string{workspace}
 
-	// This test requires actual network - skip in CI if network is unavailable
+	// This test requires actual network and a running SOCKS5 proxy
 	if os.Getenv("FENCE_TEST_NETWORK") != "1" {
-		t.Skip("skipping: set FENCE_TEST_NETWORK=1 to run network tests")
+		t.Skip("skipping: set FENCE_TEST_NETWORK=1 to run network tests (requires SOCKS5 proxy on localhost:1080)")
 	}
 
 	result := runUnderSandboxWithTimeout(t, cfg, "curl -s --connect-timeout 5 --max-time 10 https://httpbin.org/get", workspace, 15*time.Second)

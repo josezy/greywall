@@ -125,10 +125,7 @@ func assertContains(t *testing.T, haystack, needle string) {
 // testConfig creates a test configuration with sensible defaults.
 func testConfig() *config.Config {
 	return &config.Config{
-		Network: config.NetworkConfig{
-			AllowedDomains: []string{},
-			DeniedDomains:  []string{},
-		},
+		Network: config.NetworkConfig{},
 		Filesystem: config.FilesystemConfig{
 			DenyRead:   []string{},
 			AllowWrite: []string{},
@@ -149,10 +146,10 @@ func testConfigWithWorkspace(workspacePath string) *config.Config {
 	return cfg
 }
 
-// testConfigWithNetwork creates a config that allows specific domains.
-func testConfigWithNetwork(domains ...string) *config.Config {
+// testConfigWithProxy creates a config with a proxy URL set.
+func testConfigWithProxy(proxyURL string) *config.Config {
 	cfg := testConfig()
-	cfg.Network.AllowedDomains = domains
+	cfg.Network.ProxyURL = proxyURL
 	return cfg
 }
 

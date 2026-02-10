@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,14 +26,11 @@ type Config struct {
 
 // NetworkConfig defines network restrictions.
 type NetworkConfig struct {
-	AllowedDomains      []string `json:"allowedDomains"`
-	DeniedDomains       []string `json:"deniedDomains"`
+	ProxyURL            string   `json:"proxyUrl,omitempty"`            // External SOCKS5 proxy (e.g. socks5://host:1080)
 	AllowUnixSockets    []string `json:"allowUnixSockets,omitempty"`
 	AllowAllUnixSockets bool     `json:"allowAllUnixSockets,omitempty"`
 	AllowLocalBinding   bool     `json:"allowLocalBinding,omitempty"`
 	AllowLocalOutbound  *bool    `json:"allowLocalOutbound,omitempty"` // If nil, defaults to AllowLocalBinding value
-	HTTPProxyPort       int      `json:"httpProxyPort,omitempty"`
-	SOCKSProxyPort      int      `json:"socksProxyPort,omitempty"`
 }
 
 // FilesystemConfig defines filesystem restrictions.
@@ -106,13 +104,10 @@ var DefaultDeniedCommands = []string{
 	"nsenter",
 }
 
-// Default returns the default configuration with all network blocked.
+// Default returns the default configuration with all network blocked (no proxy = no network).
 func Default() *Config {
 	return &Config{
-		Network: NetworkConfig{
-			AllowedDomains: []string{},
-			DeniedDomains:  []string{},
-		},
+		Network: NetworkConfig{},
 		Filesystem: FilesystemConfig{
 			DenyRead:   []string{},
 			AllowWrite: []string{},
@@ -196,14 +191,9 @@ func Load(path string) (*Config, error) {
 
 // Validate validates the configuration.
 func (c *Config) Validate() error {
-	for _, domain := range c.Network.AllowedDomains {
-		if err := validateDomainPattern(domain); err != nil {
-			return fmt.Errorf("invalid allowed domain %q: %w", domain, err)
-		}
-	}
-	for _, domain := range c.Network.DeniedDomains {
-		if err := validateDomainPattern(domain); err != nil {
-			return fmt.Errorf("invalid denied domain %q: %w", domain, err)
+	if c.Network.ProxyURL != "" {
+		if err := validateProxyURL(c.Network.ProxyURL); err != nil {
+			return fmt.Errorf("invalid network.proxyUrl %q: %w", c.Network.ProxyURL, err)
 		}
 	}
 
@@ -253,46 +243,21 @@ func (c *CommandConfig) UseDefaultDeniedCommands() bool {
 	return c.UseDefaults == nil || *c.UseDefaults
 }
 
-func validateDomainPattern(pattern string) error {
-	if pattern == "localhost" {
-		return nil
+// validateProxyURL validates a SOCKS5 proxy URL.
+func validateProxyURL(proxyURL string) error {
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
 	}
-
-	if strings.Contains(pattern, "://") || strings.Contains(pattern, "/") || strings.Contains(pattern, ":") {
-		return errors.New("domain pattern cannot contain protocol, path, or port")
+	if u.Scheme != "socks5" && u.Scheme != "socks5h" {
+		return errors.New("proxy URL must use socks5:// or socks5h:// scheme")
 	}
-
-	// Handle wildcard patterns
-	if strings.HasPrefix(pattern, "*.") {
-		domain := pattern[2:]
-		// Must have at least one more dot after the wildcard
-		if !strings.Contains(domain, ".") {
-			return errors.New("wildcard pattern too broad (e.g., *.com not allowed)")
-		}
-		if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
-			return errors.New("invalid domain format")
-		}
-		// Check each part has content
-		parts := strings.Split(domain, ".")
-		if len(parts) < 2 {
-			return errors.New("wildcard pattern too broad")
-		}
-		if slices.Contains(parts, "") {
-			return errors.New("invalid domain format")
-		}
-		return nil
+	if u.Hostname() == "" {
+		return errors.New("proxy URL must include a hostname")
 	}
-
-	// Reject other uses of wildcards
-	if strings.Contains(pattern, "*") {
-		return errors.New("only *.domain.com wildcard patterns are allowed")
+	if u.Port() == "" {
+		return errors.New("proxy URL must include a port")
 	}
-
-	// Regular domains must have at least one dot
-	if !strings.Contains(pattern, ".") || strings.HasPrefix(pattern, ".") || strings.HasSuffix(pattern, ".") {
-		return errors.New("invalid domain format")
-	}
-
 	return nil
 }
 
@@ -330,26 +295,6 @@ func isIPv6Pattern(pattern string) bool {
 	// IPv6 addresses contain multiple colons
 	colonCount := strings.Count(pattern, ":")
 	return colonCount >= 2
-}
-
-// MatchesDomain checks if a hostname matches a domain pattern.
-func MatchesDomain(hostname, pattern string) bool {
-	hostname = strings.ToLower(hostname)
-	pattern = strings.ToLower(pattern)
-
-	// "*" matches all domains
-	if pattern == "*" {
-		return true
-	}
-
-	// Wildcard pattern like *.example.com
-	if strings.HasPrefix(pattern, "*.") {
-		baseDomain := pattern[2:]
-		return strings.HasSuffix(hostname, "."+baseDomain)
-	}
-
-	// Exact match
-	return hostname == pattern
 }
 
 // MatchesHost checks if a hostname matches an SSH host pattern.
@@ -440,9 +385,10 @@ func Merge(base, override *Config) *Config {
 		AllowPty: base.AllowPty || override.AllowPty,
 
 		Network: NetworkConfig{
+			// ProxyURL: override wins if non-empty
+			ProxyURL: mergeString(base.Network.ProxyURL, override.Network.ProxyURL),
+
 			// Append slices (base first, then override additions)
-			AllowedDomains:   mergeStrings(base.Network.AllowedDomains, override.Network.AllowedDomains),
-			DeniedDomains:    mergeStrings(base.Network.DeniedDomains, override.Network.DeniedDomains),
 			AllowUnixSockets: mergeStrings(base.Network.AllowUnixSockets, override.Network.AllowUnixSockets),
 
 			// Boolean fields: override wins if set, otherwise base
@@ -451,10 +397,6 @@ func Merge(base, override *Config) *Config {
 
 			// Pointer fields: override wins if set, otherwise base
 			AllowLocalOutbound: mergeOptionalBool(base.Network.AllowLocalOutbound, override.Network.AllowLocalOutbound),
-
-			// Port fields: override wins if non-zero
-			HTTPProxyPort:  mergeInt(base.Network.HTTPProxyPort, override.Network.HTTPProxyPort),
-			SOCKSProxyPort: mergeInt(base.Network.SOCKSProxyPort, override.Network.SOCKSProxyPort),
 		},
 
 		Filesystem: FilesystemConfig{
@@ -531,9 +473,9 @@ func mergeOptionalBool(base, override *bool) *bool {
 	return base
 }
 
-// mergeInt returns override if non-zero, otherwise base.
-func mergeInt(base, override int) int {
-	if override != 0 {
+// mergeString returns override if non-empty, otherwise base.
+func mergeString(base, override string) string {
+	if override != "" {
 		return override
 	}
 	return base

@@ -35,6 +35,11 @@ type LinuxFeatures struct {
 	// This can be false in containerized environments (Docker, CI) without CAP_NET_ADMIN
 	CanUnshareNet bool
 
+	// Transparent proxy support
+	HasIpCommand  bool // ip (iproute2) available
+	HasDevNetTun  bool // /dev/net/tun exists
+	HasTun2Socks  bool // tun2socks embedded binary available
+
 	// Kernel version
 	KernelMajor int
 	KernelMinor int
@@ -74,6 +79,12 @@ func (f *LinuxFeatures) detect() {
 
 	// Check if we can create network namespaces
 	f.detectNetworkNamespace()
+
+	// Check transparent proxy support
+	f.HasIpCommand = commandExists("ip")
+	_, err := os.Stat("/dev/net/tun")
+	f.HasDevNetTun = err == nil
+	f.HasTun2Socks = true // embedded binary, always available
 }
 
 func (f *LinuxFeatures) parseKernelVersion() {
@@ -253,6 +264,11 @@ func (f *LinuxFeatures) CanMonitorViolations() bool {
 // CanUseLandlock returns true if Landlock is available.
 func (f *LinuxFeatures) CanUseLandlock() bool {
 	return f.HasLandlock && f.LandlockABI >= 1
+}
+
+// CanUseTransparentProxy returns true if transparent proxying via tun2socks is possible.
+func (f *LinuxFeatures) CanUseTransparentProxy() bool {
+	return f.HasIpCommand && f.HasDevNetTun && f.CanUnshareNet
 }
 
 // MinimumViable returns true if the minimum required features are available.

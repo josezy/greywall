@@ -2,22 +2,17 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/Use-Tusk/fence/internal/config"
-	"github.com/Use-Tusk/fence/internal/importer"
 	"github.com/Use-Tusk/fence/internal/platform"
 	"github.com/Use-Tusk/fence/internal/sandbox"
-	"github.com/Use-Tusk/fence/internal/templates"
 	"github.com/spf13/cobra"
 )
 
@@ -32,8 +27,7 @@ var (
 	debug         bool
 	monitor       bool
 	settingsPath  string
-	templateName  string
-	listTemplates bool
+	proxyURL      string
 	cmdString     string
 	exposePorts   []string
 	exitCode      int
@@ -55,25 +49,29 @@ func main() {
 		Long: `fence is a command-line tool that runs commands in a sandboxed environment
 with network and filesystem restrictions.
 
-By default, all network access is blocked. Configure allowed domains in
-~/.config/fence/fence.json (or ~/Library/Application Support/fence/fence.json on macOS)
-or pass a settings file with --settings, or use a built-in template with --template.
+By default, all network access is blocked. Use --proxy to route traffic through
+an external SOCKS5 proxy, or configure a proxy URL in your settings file at
+~/.config/fence/fence.json (or ~/Library/Application Support/fence/fence.json on macOS).
+
+On Linux, fence uses tun2socks for truly transparent proxying: all TCP/UDP traffic
+from any binary is captured at the kernel level via a TUN device and forwarded
+through the external SOCKS5 proxy. No application awareness needed.
+
+On macOS, fence uses environment variables (best-effort) to direct traffic
+to the proxy.
 
 Examples:
-  fence curl https://example.com          # Will be blocked (no domains allowed)
-  fence -- curl -s https://example.com    # Use -- to separate fence flags from command
-  fence -c "echo hello && ls"             # Run with shell expansion
+  fence -- curl https://example.com                          # Blocked (no proxy)
+  fence --proxy socks5://localhost:1080 -- curl https://example.com  # Via proxy
+  fence -- curl -s https://example.com                       # Use -- to separate flags
+  fence -c "echo hello && ls"                                # Run with shell expansion
   fence --settings config.json npm install
-  fence -t npm-install npm install        # Use built-in npm-install template
-  fence -t ai-coding-agents -- agent-cmd  # Use AI coding agents template
-  fence -p 3000 -c "npm run dev"          # Expose port 3000 for inbound connections
-  fence --list-templates                  # Show available built-in templates
+  fence -p 3000 -c "npm run dev"                             # Expose port 3000
 
 Configuration file format:
 {
   "network": {
-    "allowedDomains": ["github.com", "*.npmjs.org"],
-    "deniedDomains": []
+    "proxyUrl": "socks5://localhost:1080"
   },
   "filesystem": {
     "denyRead": [],
@@ -91,10 +89,9 @@ Configuration file format:
 	}
 
 	rootCmd.Flags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
-	rootCmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "Monitor and log sandbox violations (macOS: log stream, all: proxy denials)")
+	rootCmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "Monitor and log sandbox violations")
 	rootCmd.Flags().StringVarP(&settingsPath, "settings", "s", "", "Path to settings file (default: OS config directory)")
-	rootCmd.Flags().StringVarP(&templateName, "template", "t", "", "Use built-in template (e.g., ai-coding-agents, npm-install)")
-	rootCmd.Flags().BoolVar(&listTemplates, "list-templates", false, "List available templates")
+	rootCmd.Flags().StringVar(&proxyURL, "proxy", "", "External SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
 	rootCmd.Flags().StringVarP(&cmdString, "c", "c", "", "Run command string directly (like sh -c)")
 	rootCmd.Flags().StringArrayVarP(&exposePorts, "port", "p", nil, "Expose port for inbound connections (can be used multiple times)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Show version information")
@@ -102,7 +99,6 @@ Configuration file format:
 
 	rootCmd.Flags().SetInterspersed(true)
 
-	rootCmd.AddCommand(newImportCmd())
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
 
 	if err := rootCmd.Execute(); err != nil {
@@ -123,11 +119,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	if linuxFeatures {
 		sandbox.PrintLinuxFeatures()
-		return nil
-	}
-
-	if listTemplates {
-		printTemplates()
 		return nil
 	}
 
@@ -158,28 +149,15 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[fence] Exposing ports: %v\n", ports)
 	}
 
-	// Load config: template > settings file > default path
+	// Load config: settings file > default path > default config
 	var cfg *config.Config
 	var err error
 
 	switch {
-	case templateName != "":
-		cfg, err = templates.Load(templateName)
-		if err != nil {
-			return fmt.Errorf("failed to load template: %w\nUse --list-templates to see available templates", err)
-		}
-		if debug {
-			fmt.Fprintf(os.Stderr, "[fence] Using template: %s\n", templateName)
-		}
 	case settingsPath != "":
 		cfg, err = config.Load(settingsPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
-		}
-		absPath, _ := filepath.Abs(settingsPath)
-		cfg, err = templates.ResolveExtendsWithBaseDir(cfg, filepath.Dir(absPath))
-		if err != nil {
-			return fmt.Errorf("failed to resolve extends: %w", err)
 		}
 	default:
 		configPath := config.DefaultConfigPath()
@@ -192,12 +170,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(os.Stderr, "[fence] No config found at %s, using default (block all network)\n", configPath)
 			}
 			cfg = config.Default()
-		} else {
-			cfg, err = templates.ResolveExtendsWithBaseDir(cfg, filepath.Dir(configPath))
-			if err != nil {
-				return fmt.Errorf("failed to resolve extends: %w", err)
-			}
 		}
+	}
+
+	// CLI --proxy flag overrides config
+	if proxyURL != "" {
+		cfg.Network.ProxyURL = proxyURL
 	}
 
 	manager := sandbox.NewManager(cfg, debug, monitor)
@@ -263,12 +241,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Note: Landlock is NOT applied here because:
-	// 1. The sandboxed command is already running (Landlock only affects future children)
-	// 2. Proper Landlock integration requires applying restrictions inside the sandbox
-	// For now, filesystem isolation relies on bwrap mount namespaces.
-	// Landlock code exists for future integration (e.g., via a wrapper binary).
-
 	go func() {
 		sigCount := 0
 		for sig := range sigChan {
@@ -296,136 +268,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// newImportCmd creates the import subcommand.
-func newImportCmd() *cobra.Command {
-	var (
-		claudeMode bool
-		inputFile  string
-		outputFile string
-		saveFlag   bool
-		forceFlag  bool
-		extendTmpl string
-		noExtend   bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "import",
-		Short: "Import settings from other tools",
-		Long: `Import permission settings from other tools and convert them to fence config.
-
-Currently supported sources:
-  --claude    Import from Claude Code settings
-
-By default, imports extend the "code" template which provides sensible defaults
-for network access (npm, GitHub, LLM providers) and filesystem protections.
-Use --no-extend for a minimal config, or --extend to choose a different template.
-
-Examples:
-  # Preview import (prints JSON to stdout)
-  fence import --claude
-
-  # Save to the default config path
-  #   Linux: ~/.config/fence/fence.json
-  #   macOS: ~/Library/Application Support/fence/fence.json
-  fence import --claude --save
-
-  # Save to a specific output file
-  fence import --claude -o ./fence.json
-
-  # Import from a specific Claude Code settings file
-  fence import --claude -f ~/.claude/settings.json --save
-
-  # Import without extending any template (minimal config)
-  fence import --claude --no-extend --save
-
-  # Import and extend a different template
-  fence import --claude --extend local-dev-server --save`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if !claudeMode {
-				return fmt.Errorf("no import source specified. Use --claude to import from Claude Code")
-			}
-
-			opts := importer.DefaultImportOptions()
-			if noExtend {
-				opts.Extends = ""
-			} else if extendTmpl != "" {
-				opts.Extends = extendTmpl
-			}
-
-			result, err := importer.ImportFromClaude(inputFile, opts)
-			if err != nil {
-				return fmt.Errorf("failed to import Claude settings: %w", err)
-			}
-
-			for _, warning := range result.Warnings {
-				fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
-			}
-			if len(result.Warnings) > 0 {
-				fmt.Fprintln(os.Stderr)
-			}
-
-			// Determine output destination
-			var destPath string
-			if saveFlag {
-				destPath = config.DefaultConfigPath()
-			} else if outputFile != "" {
-				destPath = outputFile
-			}
-
-			if destPath != "" {
-				if !forceFlag {
-					if _, err := os.Stat(destPath); err == nil {
-						fmt.Printf("File %q already exists. Overwrite? [y/N] ", destPath)
-						reader := bufio.NewReader(os.Stdin)
-						response, _ := reader.ReadString('\n')
-						response = strings.TrimSpace(strings.ToLower(response))
-						if response != "y" && response != "yes" {
-							fmt.Println("Aborted.")
-							return nil
-						}
-					}
-				}
-
-				if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
-					return fmt.Errorf("failed to create config directory: %w", err)
-				}
-
-				if err := importer.WriteConfig(result.Config, destPath); err != nil {
-					return err
-				}
-				fmt.Printf("Imported %d rules from %s\n", result.RulesImported, result.SourcePath)
-				fmt.Printf("Written to %q\n", destPath)
-			} else {
-				// Print clean JSON to stdout, helpful info to stderr (don't interfere with piping)
-				data, err := importer.MarshalConfigJSON(result.Config)
-				if err != nil {
-					return fmt.Errorf("failed to marshal config: %w", err)
-				}
-				fmt.Println(string(data))
-				if result.Config.Extends != "" {
-					fmt.Fprintf(os.Stderr, "\n# Extends %q - inherited rules not shown\n", result.Config.Extends)
-				}
-				fmt.Fprintf(os.Stderr, "# Imported %d rules from %s\n", result.RulesImported, result.SourcePath)
-				fmt.Fprintf(os.Stderr, "# Use --save to write to the default config path\n")
-			}
-
-			return nil
-		},
-	}
-
-	cmd.Flags().BoolVar(&claudeMode, "claude", false, "Import from Claude Code settings")
-	cmd.Flags().StringVarP(&inputFile, "file", "f", "", "Path to settings file (default: ~/.claude/settings.json for --claude)")
-	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file path")
-	cmd.Flags().BoolVar(&saveFlag, "save", false, "Save to the default config path")
-	cmd.Flags().BoolVarP(&forceFlag, "force", "y", false, "Overwrite existing file without prompting")
-	cmd.Flags().StringVar(&extendTmpl, "extend", "", "Template to extend (default: code)")
-	cmd.Flags().BoolVar(&noExtend, "no-extend", false, "Don't extend any template (minimal config)")
-	cmd.MarkFlagsMutuallyExclusive("extend", "no-extend")
-	cmd.MarkFlagsMutuallyExclusive("save", "output")
-
-	return cmd
 }
 
 // newCompletionCmd creates the completion subcommand for shell completions.
@@ -471,18 +313,6 @@ ${fpath[1]}/_fence for zsh, ~/.config/fish/completions/fence.fish for fish).
 		},
 	}
 	return cmd
-}
-
-// printTemplates prints all available templates to stdout.
-func printTemplates() {
-	fmt.Println("Available templates:")
-	fmt.Println()
-	for _, t := range templates.List() {
-		fmt.Printf("  %-20s %s\n", t.Name, t.Description)
-	}
-	fmt.Println()
-	fmt.Println("Usage: fence -t <template> <command>")
-	fmt.Println("Example: fence -t code -- code")
 }
 
 // runLandlockWrapper runs in "wrapper mode" inside the sandbox.

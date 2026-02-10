@@ -125,16 +125,14 @@ func TestNormalizePath(t *testing.T) {
 
 func TestGenerateProxyEnvVars(t *testing.T) {
 	tests := []struct {
-		name      string
-		httpPort  int
-		socksPort int
-		wantEnvs  []string
-		dontWant  []string
+		name     string
+		proxyURL string
+		wantEnvs []string
+		dontWant []string
 	}{
 		{
-			name:      "no ports",
-			httpPort:  0,
-			socksPort: 0,
+			name:     "no proxy",
+			proxyURL: "",
 			wantEnvs: []string{
 				"FENCE_SANDBOX=1",
 				"TMPDIR=/tmp/fence",
@@ -146,56 +144,34 @@ func TestGenerateProxyEnvVars(t *testing.T) {
 			},
 		},
 		{
-			name:      "http port only",
-			httpPort:  8080,
-			socksPort: 0,
+			name:     "socks5 proxy",
+			proxyURL: "socks5://localhost:1080",
 			wantEnvs: []string{
 				"FENCE_SANDBOX=1",
-				"HTTP_PROXY=http://localhost:8080",
-				"HTTPS_PROXY=http://localhost:8080",
-				"http_proxy=http://localhost:8080",
-				"https_proxy=http://localhost:8080",
+				"ALL_PROXY=socks5://localhost:1080",
+				"all_proxy=socks5://localhost:1080",
+				"HTTP_PROXY=socks5://localhost:1080",
+				"HTTPS_PROXY=socks5://localhost:1080",
+				"http_proxy=socks5://localhost:1080",
+				"https_proxy=socks5://localhost:1080",
 				"NO_PROXY=",
 				"no_proxy=",
 			},
-			dontWant: []string{
-				"ALL_PROXY=",
-				"all_proxy=",
-			},
 		},
 		{
-			name:      "socks port only",
-			httpPort:  0,
-			socksPort: 1080,
+			name:     "socks5h proxy",
+			proxyURL: "socks5h://proxy.example.com:1080",
 			wantEnvs: []string{
 				"FENCE_SANDBOX=1",
-				"ALL_PROXY=socks5h://localhost:1080",
-				"all_proxy=socks5h://localhost:1080",
-				"FTP_PROXY=socks5h://localhost:1080",
-				"GIT_SSH_COMMAND=",
-			},
-			dontWant: []string{
-				"HTTP_PROXY=",
-				"HTTPS_PROXY=",
-			},
-		},
-		{
-			name:      "both ports",
-			httpPort:  8080,
-			socksPort: 1080,
-			wantEnvs: []string{
-				"FENCE_SANDBOX=1",
-				"HTTP_PROXY=http://localhost:8080",
-				"HTTPS_PROXY=http://localhost:8080",
-				"ALL_PROXY=socks5h://localhost:1080",
-				"GIT_SSH_COMMAND=",
+				"ALL_PROXY=socks5h://proxy.example.com:1080",
+				"HTTP_PROXY=socks5h://proxy.example.com:1080",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GenerateProxyEnvVars(tt.httpPort, tt.socksPort)
+			got := GenerateProxyEnvVars(tt.proxyURL)
 
 			// Check expected env vars are present
 			for _, want := range tt.wantEnvs {
@@ -207,7 +183,7 @@ func TestGenerateProxyEnvVars(t *testing.T) {
 					}
 				}
 				if !found {
-					t.Errorf("GenerateProxyEnvVars(%d, %d) missing %q", tt.httpPort, tt.socksPort, want)
+					t.Errorf("GenerateProxyEnvVars(%q) missing %q", tt.proxyURL, want)
 				}
 			}
 
@@ -215,7 +191,7 @@ func TestGenerateProxyEnvVars(t *testing.T) {
 			for _, dontWant := range tt.dontWant {
 				for _, env := range got {
 					if strings.HasPrefix(env, dontWant) {
-						t.Errorf("GenerateProxyEnvVars(%d, %d) should not contain %q, got %q", tt.httpPort, tt.socksPort, dontWant, env)
+						t.Errorf("GenerateProxyEnvVars(%q) should not contain %q, got %q", tt.proxyURL, dontWant, env)
 					}
 				}
 			}

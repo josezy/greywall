@@ -15,6 +15,9 @@ type LinuxFeatures struct {
 	HasCapBPF       bool
 	HasCapRoot      bool
 	CanUnshareNet   bool
+	HasIpCommand    bool
+	HasDevNetTun    bool
+	HasTun2Socks    bool
 	KernelMajor     int
 	KernelMinor     int
 }
@@ -36,6 +39,11 @@ func (f *LinuxFeatures) CanMonitorViolations() bool {
 
 // CanUseLandlock returns false on non-Linux platforms.
 func (f *LinuxFeatures) CanUseLandlock() bool {
+	return false
+}
+
+// CanUseTransparentProxy returns false on non-Linux platforms.
+func (f *LinuxFeatures) CanUseTransparentProxy() bool {
 	return false
 }
 

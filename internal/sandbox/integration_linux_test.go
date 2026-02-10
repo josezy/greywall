@@ -34,15 +34,11 @@ func skipIfLandlockNotUsable(t *testing.T) {
 }
 
 // assertNetworkBlocked verifies that a network command was blocked.
-// It checks for either a non-zero exit code OR the proxy's blocked message.
+// With no proxy configured, --unshare-net blocks all network at the kernel level.
 func assertNetworkBlocked(t *testing.T, result *SandboxTestResult) {
 	t.Helper()
-	blockedMessage := "Connection blocked by network allowlist"
 	if result.Failed() {
 		return // Command failed = blocked
-	}
-	if strings.Contains(result.Stdout, blockedMessage) || strings.Contains(result.Stderr, blockedMessage) {
-		return // Proxy blocked the request
 	}
 	t.Errorf("expected network request to be blocked, but it succeeded\nstdout: %s\nstderr: %s",
 		result.Stdout, result.Stderr)
@@ -277,7 +273,7 @@ func TestLinux_NetworkBlocksCurl(t *testing.T) {
 
 	workspace := createTempWorkspace(t)
 	cfg := testConfigWithWorkspace(workspace)
-	// No domains allowed = all network blocked
+	// No proxy = all network blocked
 
 	result := runUnderSandboxWithTimeout(t, cfg, "curl -s --connect-timeout 2 --max-time 3 http://example.com", workspace, 10*time.Second)
 
@@ -344,18 +340,19 @@ func TestLinux_NetworkBlocksDevTcp(t *testing.T) {
 	assertBlocked(t, result)
 }
 
-// TestLinux_ProxyAllowsAllowedDomains verifies the proxy allows configured domains.
-func TestLinux_ProxyAllowsAllowedDomains(t *testing.T) {
+// TestLinux_TransparentProxyRoutesThroughSocks verifies traffic routes through SOCKS5 proxy.
+// This test requires a running SOCKS5 proxy and actual network connectivity.
+func TestLinux_TransparentProxyRoutesThroughSocks(t *testing.T) {
 	skipIfAlreadySandboxed(t)
 	skipIfCommandNotFound(t, "curl")
 
 	workspace := createTempWorkspace(t)
-	cfg := testConfigWithNetwork("httpbin.org")
+	cfg := testConfigWithProxy("socks5://localhost:1080")
 	cfg.Filesystem.AllowWrite = []string{workspace}
 
-	// This test requires actual network - skip in CI if network is unavailable
+	// This test requires actual network and a running SOCKS5 proxy
 	if os.Getenv("FENCE_TEST_NETWORK") != "1" {
-		t.Skip("skipping: set FENCE_TEST_NETWORK=1 to run network tests")
+		t.Skip("skipping: set FENCE_TEST_NETWORK=1 to run network tests (requires SOCKS5 proxy on localhost:1080)")
 	}
 
 	result := runUnderSandboxWithTimeout(t, cfg, "curl -s --connect-timeout 5 --max-time 10 https://httpbin.org/get", workspace, 15*time.Second)

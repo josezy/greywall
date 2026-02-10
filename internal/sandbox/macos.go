@@ -4,11 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/Use-Tusk/fence/internal/config"
@@ -29,8 +29,9 @@ func generateSessionSuffix() string {
 type MacOSSandboxParams struct {
 	Command                 string
 	NeedsNetworkRestriction bool
-	HTTPProxyPort           int
-	SOCKSProxyPort          int
+	ProxyURL                string // External proxy URL (for env vars)
+	ProxyHost               string // Proxy host (for sandbox profile network rules)
+	ProxyPort               string // Proxy port (for sandbox profile network rules)
 	AllowUnixSockets        []string
 	AllowAllUnixSockets     bool
 	AllowLocalBinding       bool
@@ -519,18 +520,10 @@ func GenerateSandboxProfile(params MacOSSandboxParams) string {
 			}
 		}
 
-		if params.HTTPProxyPort > 0 {
-			profile.WriteString(fmt.Sprintf(`(allow network-bind (local ip "localhost:%d"))
-(allow network-inbound (local ip "localhost:%d"))
-(allow network-outbound (remote ip "localhost:%d"))
-`, params.HTTPProxyPort, params.HTTPProxyPort, params.HTTPProxyPort))
-		}
-
-		if params.SOCKSProxyPort > 0 {
-			profile.WriteString(fmt.Sprintf(`(allow network-bind (local ip "localhost:%d"))
-(allow network-inbound (local ip "localhost:%d"))
-(allow network-outbound (remote ip "localhost:%d"))
-`, params.SOCKSProxyPort, params.SOCKSProxyPort, params.SOCKSProxyPort))
+		// Allow outbound to the external proxy host:port
+		if params.ProxyHost != "" && params.ProxyPort != "" {
+			profile.WriteString(fmt.Sprintf(`(allow network-outbound (remote ip "%s:%s"))
+`, params.ProxyHost, params.ProxyPort))
 		}
 	}
 	profile.WriteString("\n")
@@ -568,15 +561,7 @@ func GenerateSandboxProfile(params MacOSSandboxParams) string {
 }
 
 // WrapCommandMacOS wraps a command with macOS sandbox restrictions.
-func WrapCommandMacOS(cfg *config.Config, command string, httpPort, socksPort int, exposedPorts []int, debug bool) (string, error) {
-	// Check if allowedDomains contains "*" (wildcard = allow all direct network)
-	// In this mode, we still run the proxy for apps that respect HTTP_PROXY,
-	// but allow direct connections for apps that don't (like cursor-agent, opencode).
-	// deniedDomains will only be enforced for apps that use the proxy.
-	hasWildcardAllow := slices.Contains(cfg.Network.AllowedDomains, "*")
-
-	needsNetwork := len(cfg.Network.AllowedDomains) > 0 || len(cfg.Network.DeniedDomains) > 0
-
+func WrapCommandMacOS(cfg *config.Config, command string, exposedPorts []int, debug bool) (string, error) {
 	// Build allow paths: default + configured
 	allowPaths := append(GetDefaultWritePaths(), cfg.Filesystem.AllowWrite...)
 
@@ -591,20 +576,25 @@ func WrapCommandMacOS(cfg *config.Config, command string, httpPort, socksPort in
 		allowLocalOutbound = *cfg.Network.AllowLocalOutbound
 	}
 
-	// If wildcard allow, don't restrict network at sandbox level (allow direct connections).
-	// Otherwise, restrict to localhost/proxy only (strict mode).
-	needsNetworkRestriction := !hasWildcardAllow && (needsNetwork || len(cfg.Network.AllowedDomains) == 0)
-
-	if debug && hasWildcardAllow {
-		fmt.Fprintf(os.Stderr, "[fence:macos] Wildcard allowedDomains detected - allowing direct network connections\n")
-		fmt.Fprintf(os.Stderr, "[fence:macos] Note: deniedDomains only enforced for apps that respect HTTP_PROXY\n")
+	// Parse proxy URL for network rules
+	var proxyHost, proxyPort string
+	if cfg.Network.ProxyURL != "" {
+		if u, err := url.Parse(cfg.Network.ProxyURL); err == nil {
+			proxyHost = u.Hostname()
+			proxyPort = u.Port()
+		}
 	}
+
+	// Restrict network unless proxy is configured to an external host
+	// If no proxy: block all outbound. If proxy: allow outbound only to proxy.
+	needsNetworkRestriction := true
 
 	params := MacOSSandboxParams{
 		Command:                 command,
 		NeedsNetworkRestriction: needsNetworkRestriction,
-		HTTPProxyPort:           httpPort,
-		SOCKSProxyPort:          socksPort,
+		ProxyURL:                cfg.Network.ProxyURL,
+		ProxyHost:               proxyHost,
+		ProxyPort:               proxyPort,
 		AllowUnixSockets:        cfg.Network.AllowUnixSockets,
 		AllowAllUnixSockets:     cfg.Network.AllowAllUnixSockets,
 		AllowLocalBinding:       allowLocalBinding,
@@ -637,7 +627,7 @@ func WrapCommandMacOS(cfg *config.Config, command string, httpPort, socksPort in
 		return "", fmt.Errorf("shell %q not found: %w", shell, err)
 	}
 
-	proxyEnvs := GenerateProxyEnvVars(httpPort, socksPort)
+	proxyEnvs := GenerateProxyEnvVars(cfg.Network.ProxyURL)
 
 	// Build the command
 	// env VAR1=val1 VAR2=val2 sandbox-exec -p 'profile' shell -c 'command'

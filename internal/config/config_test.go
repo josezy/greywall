@@ -6,72 +6,6 @@ import (
 	"testing"
 )
 
-func TestValidateDomainPattern(t *testing.T) {
-	tests := []struct {
-		name    string
-		pattern string
-		wantErr bool
-	}{
-		// Valid patterns
-		{"valid domain", "example.com", false},
-		{"valid subdomain", "api.example.com", false},
-		{"valid wildcard", "*.example.com", false},
-		{"valid wildcard subdomain", "*.api.example.com", false},
-		{"localhost", "localhost", false},
-
-		// Invalid patterns
-		{"protocol included", "https://example.com", true},
-		{"path included", "example.com/path", true},
-		{"port included", "example.com:443", true},
-		{"wildcard too broad", "*.com", true},
-		{"invalid wildcard position", "example.*.com", true},
-		{"trailing wildcard", "example.com.*", true},
-		{"leading dot", ".example.com", true},
-		{"trailing dot", "example.com.", true},
-		{"no TLD", "example", true},
-		{"empty wildcard domain part", "*.", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateDomainPattern(tt.pattern)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateDomainPattern(%q) error = %v, wantErr %v", tt.pattern, err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestMatchesDomain(t *testing.T) {
-	tests := []struct {
-		name     string
-		hostname string
-		pattern  string
-		want     bool
-	}{
-		// Exact matches
-		{"exact match", "example.com", "example.com", true},
-		{"exact match case insensitive", "Example.COM", "example.com", true},
-		{"exact no match", "other.com", "example.com", false},
-
-		// Wildcard matches
-		{"wildcard match subdomain", "api.example.com", "*.example.com", true},
-		{"wildcard match deep subdomain", "deep.api.example.com", "*.example.com", true},
-		{"wildcard no match base domain", "example.com", "*.example.com", false},
-		{"wildcard no match different domain", "api.other.com", "*.example.com", false},
-		{"wildcard case insensitive", "API.Example.COM", "*.example.com", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := MatchesDomain(tt.hostname, tt.pattern)
-			if got != tt.want {
-				t.Errorf("MatchesDomain(%q, %q) = %v, want %v", tt.hostname, tt.pattern, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -84,29 +18,55 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid config with domains",
+			name: "valid config with proxy",
 			config: Config{
 				Network: NetworkConfig{
-					AllowedDomains: []string{"example.com", "*.github.com"},
-					DeniedDomains:  []string{"blocked.com"},
+					ProxyURL: "socks5://localhost:1080",
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "invalid allowed domain",
+			name: "valid socks5h proxy",
 			config: Config{
 				Network: NetworkConfig{
-					AllowedDomains: []string{"https://example.com"},
+					ProxyURL: "socks5h://proxy.example.com:1080",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid proxy - wrong scheme",
+			config: Config{
+				Network: NetworkConfig{
+					ProxyURL: "http://localhost:1080",
 				},
 			},
 			wantErr: true,
 		},
 		{
-			name: "invalid denied domain",
+			name: "invalid proxy - no port",
 			config: Config{
 				Network: NetworkConfig{
-					DeniedDomains: []string{"*.com"},
+					ProxyURL: "socks5://localhost",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid proxy - no host",
+			config: Config{
+				Network: NetworkConfig{
+					ProxyURL: "socks5://:1080",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid proxy - not a URL",
+			config: Config{
+				Network: NetworkConfig{
+					ProxyURL: "not-a-url",
 				},
 			},
 			wantErr: true,
@@ -164,11 +124,8 @@ func TestDefault(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("Default() returned nil")
 	}
-	if cfg.Network.AllowedDomains == nil {
-		t.Error("AllowedDomains should not be nil")
-	}
-	if cfg.Network.DeniedDomains == nil {
-		t.Error("DeniedDomains should not be nil")
+	if cfg.Network.ProxyURL != "" {
+		t.Error("ProxyURL should be empty by default")
 	}
 	if cfg.Filesystem.DenyRead == nil {
 		t.Error("DenyRead should not be nil")
@@ -222,21 +179,18 @@ func TestLoad(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid config",
+			name: "valid config with proxy",
 			setup: func(dir string) string {
 				path := filepath.Join(dir, "valid.json")
-				content := `{"network":{"allowedDomains":["example.com"]}}`
+				content := `{"network":{"proxyUrl":"socks5://localhost:1080"}}`
 				_ = os.WriteFile(path, []byte(content), 0o600)
 				return path
 			},
 			wantNil: false,
 			wantErr: false,
 			checkConfig: func(t *testing.T, cfg *Config) {
-				if len(cfg.Network.AllowedDomains) != 1 {
-					t.Errorf("expected 1 allowed domain, got %d", len(cfg.Network.AllowedDomains))
-				}
-				if cfg.Network.AllowedDomains[0] != "example.com" {
-					t.Errorf("expected example.com, got %s", cfg.Network.AllowedDomains[0])
+				if cfg.Network.ProxyURL != "socks5://localhost:1080" {
+					t.Errorf("expected socks5://localhost:1080, got %s", cfg.Network.ProxyURL)
 				}
 			},
 		},
@@ -251,10 +205,10 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid domain in config",
+			name: "invalid proxy URL in config",
 			setup: func(dir string) string {
-				path := filepath.Join(dir, "invalid_domain.json")
-				content := `{"network":{"allowedDomains":["*.com"]}}`
+				path := filepath.Join(dir, "invalid_proxy.json")
+				content := `{"network":{"proxyUrl":"http://localhost:1080"}}`
 				_ = os.WriteFile(path, []byte(content), 0o600)
 				return path
 			},
@@ -307,15 +261,15 @@ func TestMerge(t *testing.T) {
 		override := &Config{
 			AllowPty: true,
 			Network: NetworkConfig{
-				AllowedDomains: []string{"example.com"},
+				ProxyURL: "socks5://localhost:1080",
 			},
 		}
 		result := Merge(nil, override)
 		if !result.AllowPty {
 			t.Error("expected AllowPty to be true")
 		}
-		if len(result.Network.AllowedDomains) != 1 || result.Network.AllowedDomains[0] != "example.com" {
-			t.Error("expected AllowedDomains to be [example.com]")
+		if result.Network.ProxyURL != "socks5://localhost:1080" {
+			t.Error("expected ProxyURL to be socks5://localhost:1080")
 		}
 		if result.Extends != "" {
 			t.Error("expected Extends to be cleared")
@@ -326,15 +280,15 @@ func TestMerge(t *testing.T) {
 		base := &Config{
 			AllowPty: true,
 			Network: NetworkConfig{
-				AllowedDomains: []string{"example.com"},
+				ProxyURL: "socks5://localhost:1080",
 			},
 		}
 		result := Merge(base, nil)
 		if !result.AllowPty {
 			t.Error("expected AllowPty to be true")
 		}
-		if len(result.Network.AllowedDomains) != 1 {
-			t.Error("expected AllowedDomains to be [example.com]")
+		if result.Network.ProxyURL != "socks5://localhost:1080" {
+			t.Error("expected ProxyURL to be preserved")
 		}
 	})
 
@@ -345,47 +299,37 @@ func TestMerge(t *testing.T) {
 		}
 	})
 
-	t.Run("merge allowed domains", func(t *testing.T) {
+	t.Run("proxy URL override wins", func(t *testing.T) {
 		base := &Config{
 			Network: NetworkConfig{
-				AllowedDomains: []string{"github.com", "api.github.com"},
+				ProxyURL: "socks5://base:1080",
 			},
 		}
 		override := &Config{
-			Extends: "base-template",
 			Network: NetworkConfig{
-				AllowedDomains: []string{"private-registry.company.com"},
+				ProxyURL: "socks5://override:1080",
 			},
 		}
 		result := Merge(base, override)
 
-		// Should have all three domains
-		if len(result.Network.AllowedDomains) != 3 {
-			t.Errorf("expected 3 allowed domains, got %d: %v", len(result.Network.AllowedDomains), result.Network.AllowedDomains)
-		}
-
-		// Extends should be cleared
-		if result.Extends != "" {
-			t.Errorf("expected Extends to be cleared, got %q", result.Extends)
+		if result.Network.ProxyURL != "socks5://override:1080" {
+			t.Errorf("expected override ProxyURL, got %s", result.Network.ProxyURL)
 		}
 	})
 
-	t.Run("deduplicate merged domains", func(t *testing.T) {
+	t.Run("proxy URL base preserved when override empty", func(t *testing.T) {
 		base := &Config{
 			Network: NetworkConfig{
-				AllowedDomains: []string{"github.com", "example.com"},
+				ProxyURL: "socks5://base:1080",
 			},
 		}
 		override := &Config{
-			Network: NetworkConfig{
-				AllowedDomains: []string{"github.com", "new.com"},
-			},
+			Network: NetworkConfig{},
 		}
 		result := Merge(base, override)
 
-		// Should deduplicate
-		if len(result.Network.AllowedDomains) != 3 {
-			t.Errorf("expected 3 domains (deduped), got %d: %v", len(result.Network.AllowedDomains), result.Network.AllowedDomains)
+		if result.Network.ProxyURL != "socks5://base:1080" {
+			t.Errorf("expected base ProxyURL, got %s", result.Network.ProxyURL)
 		}
 	})
 
@@ -482,51 +426,6 @@ func TestMerge(t *testing.T) {
 		}
 		if len(result.Filesystem.AllowRead) != 2 {
 			t.Errorf("expected 2 allowRead paths, got %d: %v", len(result.Filesystem.AllowRead), result.Filesystem.AllowRead)
-		}
-	})
-
-	t.Run("merge defaultDenyRead from override", func(t *testing.T) {
-		base := &Config{
-			Filesystem: FilesystemConfig{
-				DefaultDenyRead: false,
-			},
-		}
-		override := &Config{
-			Filesystem: FilesystemConfig{
-				DefaultDenyRead: true,
-				AllowRead:       []string{"/home/user/project"},
-			},
-		}
-		result := Merge(base, override)
-
-		if !result.Filesystem.DefaultDenyRead {
-			t.Error("expected DefaultDenyRead to be true (from override)")
-		}
-		if len(result.Filesystem.AllowRead) != 1 {
-			t.Errorf("expected 1 allowRead path, got %d", len(result.Filesystem.AllowRead))
-		}
-	})
-
-	t.Run("override ports", func(t *testing.T) {
-		base := &Config{
-			Network: NetworkConfig{
-				HTTPProxyPort:  8080,
-				SOCKSProxyPort: 1080,
-			},
-		}
-		override := &Config{
-			Network: NetworkConfig{
-				HTTPProxyPort: 9090, // override
-				// SOCKSProxyPort not set, should keep base
-			},
-		}
-		result := Merge(base, override)
-
-		if result.Network.HTTPProxyPort != 9090 {
-			t.Errorf("expected HTTPProxyPort 9090, got %d", result.Network.HTTPProxyPort)
-		}
-		if result.Network.SOCKSProxyPort != 1080 {
-			t.Errorf("expected SOCKSProxyPort 1080, got %d", result.Network.SOCKSProxyPort)
 		}
 	})
 }
@@ -740,4 +639,31 @@ func TestMergeSSHConfig(t *testing.T) {
 			t.Error("expected InheritDeny to be true (OR logic)")
 		}
 	})
+}
+
+func TestValidateProxyURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"valid socks5", "socks5://localhost:1080", false},
+		{"valid socks5h", "socks5h://proxy.example.com:1080", false},
+		{"valid socks5 with ip", "socks5://192.168.1.1:1080", false},
+		{"http scheme", "http://localhost:1080", true},
+		{"https scheme", "https://localhost:1080", true},
+		{"no port", "socks5://localhost", true},
+		{"no host", "socks5://:1080", true},
+		{"not a URL", "not-a-url", true},
+		{"empty", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateProxyURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateProxyURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
 }

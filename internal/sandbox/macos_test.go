@@ -7,44 +7,34 @@ import (
 	"github.com/Use-Tusk/fence/internal/config"
 )
 
-// TestMacOS_WildcardAllowedDomainsRelaxesNetwork verifies that when allowedDomains
-// contains "*", the macOS sandbox profile allows direct network connections.
-func TestMacOS_WildcardAllowedDomainsRelaxesNetwork(t *testing.T) {
+// TestMacOS_NetworkRestrictionWithProxy verifies that when a proxy URL is set,
+// the macOS sandbox profile allows outbound to the proxy host:port.
+func TestMacOS_NetworkRestrictionWithProxy(t *testing.T) {
 	tests := []struct {
-		name                     string
-		allowedDomains           []string
-		wantNetworkRestricted    bool
-		wantAllowNetworkOutbound bool
+		name       string
+		proxyURL   string
+		wantProxy  bool
+		proxyHost  string
+		proxyPort  string
 	}{
 		{
-			name:                     "no domains - network restricted",
-			allowedDomains:           []string{},
-			wantNetworkRestricted:    true,
-			wantAllowNetworkOutbound: false,
+			name:      "no proxy - network blocked",
+			proxyURL:  "",
+			wantProxy: false,
 		},
 		{
-			name:                     "specific domain - network restricted",
-			allowedDomains:           []string{"api.openai.com"},
-			wantNetworkRestricted:    true,
-			wantAllowNetworkOutbound: false,
+			name:      "socks5 proxy - outbound allowed to proxy",
+			proxyURL:  "socks5://proxy.example.com:1080",
+			wantProxy: true,
+			proxyHost: "proxy.example.com",
+			proxyPort: "1080",
 		},
 		{
-			name:                     "wildcard domain - network unrestricted",
-			allowedDomains:           []string{"*"},
-			wantNetworkRestricted:    false,
-			wantAllowNetworkOutbound: true,
-		},
-		{
-			name:                     "wildcard with specific domains - network unrestricted",
-			allowedDomains:           []string{"api.openai.com", "*"},
-			wantNetworkRestricted:    false,
-			wantAllowNetworkOutbound: true,
-		},
-		{
-			name:                     "wildcard subdomain pattern - network restricted",
-			allowedDomains:           []string{"*.openai.com"},
-			wantNetworkRestricted:    true,
-			wantAllowNetworkOutbound: false,
+			name:      "socks5h proxy - outbound allowed to proxy",
+			proxyURL:  "socks5h://localhost:1080",
+			wantProxy: true,
+			proxyHost: "localhost",
+			proxyPort: "1080",
 		},
 	}
 
@@ -52,34 +42,33 @@ func TestMacOS_WildcardAllowedDomainsRelaxesNetwork(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{
 				Network: config.NetworkConfig{
-					AllowedDomains: tt.allowedDomains,
+					ProxyURL: tt.proxyURL,
 				},
 				Filesystem: config.FilesystemConfig{
 					AllowWrite: []string{"/tmp/test"},
 				},
 			}
 
-			// Generate the sandbox profile parameters
 			params := buildMacOSParamsForTest(cfg)
 
-			if params.NeedsNetworkRestriction != tt.wantNetworkRestricted {
-				t.Errorf("NeedsNetworkRestriction = %v, want %v",
-					params.NeedsNetworkRestriction, tt.wantNetworkRestricted)
+			if tt.wantProxy {
+				if params.ProxyHost != tt.proxyHost {
+					t.Errorf("expected ProxyHost %q, got %q", tt.proxyHost, params.ProxyHost)
+				}
+				if params.ProxyPort != tt.proxyPort {
+					t.Errorf("expected ProxyPort %q, got %q", tt.proxyPort, params.ProxyPort)
+				}
+
+				profile := GenerateSandboxProfile(params)
+				expectedRule := `(allow network-outbound (remote ip "` + tt.proxyHost + ":" + tt.proxyPort + `"))`
+				if !strings.Contains(profile, expectedRule) {
+					t.Errorf("profile should contain proxy outbound rule %q", expectedRule)
+				}
 			}
 
-			// Generate the actual profile and check its contents
-			profile := GenerateSandboxProfile(params)
-
-			// When network is unrestricted, profile should allow network* (all network ops)
-			if tt.wantAllowNetworkOutbound {
-				if !strings.Contains(profile, "(allow network*)") {
-					t.Errorf("expected unrestricted network profile to contain '(allow network*)', got:\n%s", profile)
-				}
-			} else {
-				// When network is restricted, profile should NOT have blanket allow
-				if strings.Contains(profile, "(allow network*)") {
-					t.Errorf("expected restricted network profile to NOT contain blanket '(allow network*)'")
-				}
+			// Network should always be restricted (proxy or not)
+			if !params.NeedsNetworkRestriction {
+				t.Error("NeedsNetworkRestriction should always be true")
 			}
 		})
 	}
@@ -88,15 +77,6 @@ func TestMacOS_WildcardAllowedDomainsRelaxesNetwork(t *testing.T) {
 // buildMacOSParamsForTest is a helper to build MacOSSandboxParams from config,
 // replicating the logic in WrapCommandMacOS for testing.
 func buildMacOSParamsForTest(cfg *config.Config) MacOSSandboxParams {
-	hasWildcardAllow := false
-	for _, d := range cfg.Network.AllowedDomains {
-		if d == "*" {
-			hasWildcardAllow = true
-			break
-		}
-	}
-
-	needsNetwork := len(cfg.Network.AllowedDomains) > 0 || len(cfg.Network.DeniedDomains) > 0
 	allowPaths := append(GetDefaultWritePaths(), cfg.Filesystem.AllowWrite...)
 	allowLocalBinding := cfg.Network.AllowLocalBinding
 	allowLocalOutbound := allowLocalBinding
@@ -104,13 +84,26 @@ func buildMacOSParamsForTest(cfg *config.Config) MacOSSandboxParams {
 		allowLocalOutbound = *cfg.Network.AllowLocalOutbound
 	}
 
-	needsNetworkRestriction := !hasWildcardAllow && (needsNetwork || len(cfg.Network.AllowedDomains) == 0)
+	var proxyHost, proxyPort string
+	if cfg.Network.ProxyURL != "" {
+		// Simple parsing for tests
+		parts := strings.SplitN(cfg.Network.ProxyURL, "://", 2)
+		if len(parts) == 2 {
+			hostPort := parts[1]
+			colonIdx := strings.LastIndex(hostPort, ":")
+			if colonIdx >= 0 {
+				proxyHost = hostPort[:colonIdx]
+				proxyPort = hostPort[colonIdx+1:]
+			}
+		}
+	}
 
 	return MacOSSandboxParams{
 		Command:                 "echo test",
-		NeedsNetworkRestriction: needsNetworkRestriction,
-		HTTPProxyPort:           8080,
-		SOCKSProxyPort:          1080,
+		NeedsNetworkRestriction: true,
+		ProxyURL:                cfg.Network.ProxyURL,
+		ProxyHost:               proxyHost,
+		ProxyPort:               proxyPort,
 		AllowUnixSockets:        cfg.Network.AllowUnixSockets,
 		AllowAllUnixSockets:     cfg.Network.AllowAllUnixSockets,
 		AllowLocalBinding:       allowLocalBinding,
@@ -158,8 +151,6 @@ func TestMacOS_ProfileNetworkSection(t *testing.T) {
 			params := MacOSSandboxParams{
 				Command:                 "echo test",
 				NeedsNetworkRestriction: tt.restricted,
-				HTTPProxyPort:           8080,
-				SOCKSProxyPort:          1080,
 			}
 
 			profile := GenerateSandboxProfile(params)
@@ -195,8 +186,8 @@ func TestMacOS_DefaultDenyRead(t *testing.T) {
 			defaultDenyRead:           false,
 			allowRead:                 nil,
 			wantContainsBlanketAllow:  true,
-			wantContainsMetadataAllow: false, // No separate metadata allow needed
-			wantContainsSystemAllows:  false, // No need for explicit system allows
+			wantContainsMetadataAllow: false,
+			wantContainsSystemAllows:  false,
 			wantContainsUserAllowRead: false,
 		},
 		{
@@ -204,8 +195,8 @@ func TestMacOS_DefaultDenyRead(t *testing.T) {
 			defaultDenyRead:           true,
 			allowRead:                 nil,
 			wantContainsBlanketAllow:  false,
-			wantContainsMetadataAllow: true, // Should have file-read-metadata for traversal
-			wantContainsSystemAllows:  true, // Should have explicit system path allows
+			wantContainsMetadataAllow: true,
+			wantContainsSystemAllows:  true,
 			wantContainsUserAllowRead: false,
 		},
 		{
@@ -223,35 +214,28 @@ func TestMacOS_DefaultDenyRead(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			params := MacOSSandboxParams{
 				Command:         "echo test",
-				HTTPProxyPort:   8080,
-				SOCKSProxyPort:  1080,
 				DefaultDenyRead: tt.defaultDenyRead,
 				ReadAllowPaths:  tt.allowRead,
 			}
 
 			profile := GenerateSandboxProfile(params)
 
-			// Check for blanket "(allow file-read*)" without path restrictions
-			// This appears at the start of read rules section in default mode
 			hasBlanketAllow := strings.Contains(profile, "(allow file-read*)\n")
 			if hasBlanketAllow != tt.wantContainsBlanketAllow {
 				t.Errorf("blanket file-read allow = %v, want %v", hasBlanketAllow, tt.wantContainsBlanketAllow)
 			}
 
-			// Check for file-read-metadata allow (for directory traversal in defaultDenyRead mode)
 			hasMetadataAllow := strings.Contains(profile, "(allow file-read-metadata)")
 			if hasMetadataAllow != tt.wantContainsMetadataAllow {
 				t.Errorf("file-read-metadata allow = %v, want %v", hasMetadataAllow, tt.wantContainsMetadataAllow)
 			}
 
-			// Check for system path allows (e.g., /usr, /bin) - should use file-read-data in strict mode
 			hasSystemAllows := strings.Contains(profile, `(subpath "/usr")`) ||
 				strings.Contains(profile, `(subpath "/bin")`)
 			if hasSystemAllows != tt.wantContainsSystemAllows {
 				t.Errorf("system path allows = %v, want %v\nProfile:\n%s", hasSystemAllows, tt.wantContainsSystemAllows, profile)
 			}
 
-			// Check for user-specified allowRead paths
 			if tt.wantContainsUserAllowRead && len(tt.allowRead) > 0 {
 				hasUserAllow := strings.Contains(profile, tt.allowRead[0])
 				if !hasUserAllow {

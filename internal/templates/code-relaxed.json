@@ -1,8 +1,0 @@
-{
-  "extends": "code",
-  "network": {
-    // Allow all domains directly (for apps that ignore HTTP_PROXY)
-    // The "*" wildcard bypasses proxy-based domain filtering
-    "allowedDomains": ["*"]
-  }
-}

@@ -8,10 +8,11 @@ import (
 	"github.com/Use-Tusk/fence/internal/config"
 )
 
-// LinuxBridge is a stub for non-Linux platforms.
-type LinuxBridge struct {
-	HTTPSocketPath  string
-	SOCKSSocketPath string
+// ProxyBridge is a stub for non-Linux platforms.
+type ProxyBridge struct {
+	SocketPath string
+	ProxyHost  string
+	ProxyPort  string
 }
 
 // ReverseBridge is a stub for non-Linux platforms.
@@ -29,13 +30,13 @@ type LinuxSandboxOptions struct {
 	Debug       bool
 }
 
-// NewLinuxBridge returns an error on non-Linux platforms.
-func NewLinuxBridge(httpProxyPort, socksProxyPort int, debug bool) (*LinuxBridge, error) {
-	return nil, fmt.Errorf("Linux bridge not available on this platform")
+// NewProxyBridge returns an error on non-Linux platforms.
+func NewProxyBridge(proxyURL string, debug bool) (*ProxyBridge, error) {
+	return nil, fmt.Errorf("proxy bridge not available on this platform")
 }
 
 // Cleanup is a no-op on non-Linux platforms.
-func (b *LinuxBridge) Cleanup() {}
+func (b *ProxyBridge) Cleanup() {}
 
 // NewReverseBridge returns an error on non-Linux platforms.
 func NewReverseBridge(ports []int, debug bool) (*ReverseBridge, error) {
@@ -46,12 +47,12 @@ func NewReverseBridge(ports []int, debug bool) (*ReverseBridge, error) {
 func (b *ReverseBridge) Cleanup() {}
 
 // WrapCommandLinux returns an error on non-Linux platforms.
-func WrapCommandLinux(cfg *config.Config, command string, bridge *LinuxBridge, reverseBridge *ReverseBridge, debug bool) (string, error) {
+func WrapCommandLinux(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, debug bool) (string, error) {
 	return "", fmt.Errorf("Linux sandbox not available on this platform")
 }
 
 // WrapCommandLinuxWithOptions returns an error on non-Linux platforms.
-func WrapCommandLinuxWithOptions(cfg *config.Config, command string, bridge *LinuxBridge, reverseBridge *ReverseBridge, opts LinuxSandboxOptions) (string, error) {
+func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, opts LinuxSandboxOptions) (string, error) {
 	return "", fmt.Errorf("Linux sandbox not available on this platform")
 }
 

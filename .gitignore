@@ -29,3 +29,6 @@ coverage.out
 cpu.out
 mem.out
 
+# Embedded binaries (downloaded at build time)
+internal/sandbox/bin/tun2socks-*
+

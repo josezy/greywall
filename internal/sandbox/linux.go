@@ -7,10 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -18,13 +18,13 @@ import (
 	"github.com/Use-Tusk/fence/internal/config"
 )
 
-// LinuxBridge holds the socat bridge processes for Linux sandboxing (outbound).
-type LinuxBridge struct {
-	HTTPSocketPath  string
-	SOCKSSocketPath string
-	httpProcess     *exec.Cmd
-	socksProcess    *exec.Cmd
-	debug           bool
+// ProxyBridge bridges sandbox to an external SOCKS5 proxy via Unix socket.
+type ProxyBridge struct {
+	SocketPath string // Unix socket path
+	ProxyHost  string // Parsed from ProxyURL
+	ProxyPort  string // Parsed from ProxyURL
+	process    *exec.Cmd
+	debug      bool
 }
 
 // ReverseBridge holds the socat bridge processes for inbound connections.
@@ -49,11 +49,16 @@ type LinuxSandboxOptions struct {
 	Debug bool
 }
 
-// NewLinuxBridge creates Unix socket bridges to the proxy servers.
-// This allows sandboxed processes to communicate with the host's proxy (outbound).
-func NewLinuxBridge(httpProxyPort, socksProxyPort int, debug bool) (*LinuxBridge, error) {
+// NewProxyBridge creates a Unix socket bridge to an external SOCKS5 proxy.
+// The bridge uses socat to forward from a Unix socket to the external proxy's TCP address.
+func NewProxyBridge(proxyURL string, debug bool) (*ProxyBridge, error) {
 	if _, err := exec.LookPath("socat"); err != nil {
 		return nil, fmt.Errorf("socat is required on Linux but not found: %w", err)
+	}
+
+	u, err := parseProxyURL(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid proxy URL: %w", err)
 	}
 
 	id := make([]byte, 8)
@@ -63,49 +68,33 @@ func NewLinuxBridge(httpProxyPort, socksProxyPort int, debug bool) (*LinuxBridge
 	socketID := hex.EncodeToString(id)
 
 	tmpDir := os.TempDir()
-	httpSocketPath := filepath.Join(tmpDir, fmt.Sprintf("fence-http-%s.sock", socketID))
-	socksSocketPath := filepath.Join(tmpDir, fmt.Sprintf("fence-socks-%s.sock", socketID))
+	socketPath := filepath.Join(tmpDir, fmt.Sprintf("fence-proxy-%s.sock", socketID))
 
-	bridge := &LinuxBridge{
-		HTTPSocketPath:  httpSocketPath,
-		SOCKSSocketPath: socksSocketPath,
-		debug:           debug,
+	bridge := &ProxyBridge{
+		SocketPath: socketPath,
+		ProxyHost:  u.Hostname(),
+		ProxyPort:  u.Port(),
+		debug:      debug,
 	}
 
-	// Start HTTP bridge: Unix socket -> TCP proxy
-	httpArgs := []string{
-		fmt.Sprintf("UNIX-LISTEN:%s,fork,reuseaddr", httpSocketPath),
-		fmt.Sprintf("TCP:localhost:%d", httpProxyPort),
+	// Start bridge: Unix socket -> external SOCKS5 proxy TCP
+	socatArgs := []string{
+		fmt.Sprintf("UNIX-LISTEN:%s,fork,reuseaddr", socketPath),
+		fmt.Sprintf("TCP:%s:%s", bridge.ProxyHost, bridge.ProxyPort),
 	}
-	bridge.httpProcess = exec.Command("socat", httpArgs...) //nolint:gosec // args constructed from trusted input
+	bridge.process = exec.Command("socat", socatArgs...) //nolint:gosec // args constructed from trusted input
 	if debug {
-		fmt.Fprintf(os.Stderr, "[fence:linux] Starting HTTP bridge: socat %s\n", strings.Join(httpArgs, " "))
+		fmt.Fprintf(os.Stderr, "[fence:linux] Starting proxy bridge: socat %s\n", strings.Join(socatArgs, " "))
 	}
-	if err := bridge.httpProcess.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start HTTP bridge: %w", err)
-	}
-
-	// Start SOCKS bridge: Unix socket -> TCP proxy
-	socksArgs := []string{
-		fmt.Sprintf("UNIX-LISTEN:%s,fork,reuseaddr", socksSocketPath),
-		fmt.Sprintf("TCP:localhost:%d", socksProxyPort),
-	}
-	bridge.socksProcess = exec.Command("socat", socksArgs...) //nolint:gosec // args constructed from trusted input
-	if debug {
-		fmt.Fprintf(os.Stderr, "[fence:linux] Starting SOCKS bridge: socat %s\n", strings.Join(socksArgs, " "))
-	}
-	if err := bridge.socksProcess.Start(); err != nil {
-		bridge.Cleanup()
-		return nil, fmt.Errorf("failed to start SOCKS bridge: %w", err)
+	if err := bridge.process.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start proxy bridge: %w", err)
 	}
 
-	// Wait for sockets to be created, up to 5 seconds
+	// Wait for socket to be created, up to 5 seconds
 	for range 50 {
-		httpExists := fileExists(httpSocketPath)
-		socksExists := fileExists(socksSocketPath)
-		if httpExists && socksExists {
+		if fileExists(socketPath) {
 			if debug {
-				fmt.Fprintf(os.Stderr, "[fence:linux] Bridges ready (HTTP: %s, SOCKS: %s)\n", httpSocketPath, socksSocketPath)
+				fmt.Fprintf(os.Stderr, "[fence:linux] Proxy bridge ready (%s)\n", socketPath)
 			}
 			return bridge, nil
 		}
@@ -113,27 +102,35 @@ func NewLinuxBridge(httpProxyPort, socksProxyPort int, debug bool) (*LinuxBridge
 	}
 
 	bridge.Cleanup()
-	return nil, fmt.Errorf("timeout waiting for bridge sockets to be created")
+	return nil, fmt.Errorf("timeout waiting for proxy bridge socket to be created")
 }
 
-// Cleanup stops the bridge processes and removes socket files.
-func (b *LinuxBridge) Cleanup() {
-	if b.httpProcess != nil && b.httpProcess.Process != nil {
-		_ = b.httpProcess.Process.Kill()
-		_ = b.httpProcess.Wait()
+// Cleanup stops the bridge process and removes the socket file.
+func (b *ProxyBridge) Cleanup() {
+	if b.process != nil && b.process.Process != nil {
+		_ = b.process.Process.Kill()
+		_ = b.process.Wait()
 	}
-	if b.socksProcess != nil && b.socksProcess.Process != nil {
-		_ = b.socksProcess.Process.Kill()
-		_ = b.socksProcess.Wait()
-	}
-
-	// Clean up socket files
-	_ = os.Remove(b.HTTPSocketPath)
-	_ = os.Remove(b.SOCKSSocketPath)
+	_ = os.Remove(b.SocketPath)
 
 	if b.debug {
-		fmt.Fprintf(os.Stderr, "[fence:linux] Bridges cleaned up\n")
+		fmt.Fprintf(os.Stderr, "[fence:linux] Proxy bridge cleaned up\n")
 	}
+}
+
+// parseProxyURL parses a SOCKS5 proxy URL and returns the parsed URL.
+func parseProxyURL(proxyURL string) (*url.URL, error) {
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != "socks5" && u.Scheme != "socks5h" {
+		return nil, fmt.Errorf("proxy URL must use socks5:// or socks5h:// scheme, got %s", u.Scheme)
+	}
+	if u.Hostname() == "" || u.Port() == "" {
+		return nil, fmt.Errorf("proxy URL must include hostname and port")
+	}
+	return u, nil
 }
 
 // NewReverseBridge creates Unix socket bridges for inbound connections.
@@ -308,8 +305,8 @@ func getMandatoryDenyPaths(cwd string) []string {
 
 // WrapCommandLinux wraps a command with Linux bubblewrap sandbox.
 // It uses available security features (Landlock, seccomp) with graceful fallback.
-func WrapCommandLinux(cfg *config.Config, command string, bridge *LinuxBridge, reverseBridge *ReverseBridge, debug bool) (string, error) {
-	return WrapCommandLinuxWithOptions(cfg, command, bridge, reverseBridge, LinuxSandboxOptions{
+func WrapCommandLinux(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, debug bool) (string, error) {
+	return WrapCommandLinuxWithOptions(cfg, command, proxyBridge, reverseBridge, tun2socksPath, LinuxSandboxOptions{
 		UseLandlock: true, // Enabled by default, will fall back if not available
 		UseSeccomp:  true, // Enabled by default
 		UseEBPF:     true, // Enabled by default if available
@@ -318,7 +315,7 @@ func WrapCommandLinux(cfg *config.Config, command string, bridge *LinuxBridge, r
 }
 
 // WrapCommandLinuxWithOptions wraps a command with configurable sandbox options.
-func WrapCommandLinuxWithOptions(cfg *config.Config, command string, bridge *LinuxBridge, reverseBridge *ReverseBridge, opts LinuxSandboxOptions) (string, error) {
+func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, opts LinuxSandboxOptions) (string, error) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		return "", fmt.Errorf("bubblewrap (bwrap) is required on Linux but not found: %w", err)
 	}
@@ -336,19 +333,6 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, bridge *Lin
 		fmt.Fprintf(os.Stderr, "[fence:linux] Available features: %s\n", features.Summary())
 	}
 
-	// Check if allowedDomains contains "*" (wildcard = allow all direct network)
-	// In this mode, we skip network namespace isolation so apps that don't
-	// respect HTTP_PROXY can make direct connections.
-	hasWildcardAllow := false
-	if cfg != nil {
-		hasWildcardAllow = slices.Contains(cfg.Network.AllowedDomains, "*")
-	}
-
-	if opts.Debug && hasWildcardAllow {
-		fmt.Fprintf(os.Stderr, "[fence:linux] Wildcard allowedDomains detected - allowing direct network connections\n")
-		fmt.Fprintf(os.Stderr, "[fence:linux] Note: deniedDomains only enforced for apps that respect HTTP_PROXY\n")
-	}
-
 	// Build bwrap args with filesystem restrictions
 	bwrapArgs := []string{
 		"bwrap",
@@ -356,13 +340,11 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, bridge *Lin
 		"--die-with-parent",
 	}
 
-	// Only use --unshare-net if:
-	// 1. The environment supports it (has CAP_NET_ADMIN)
-	// 2. We're NOT in wildcard mode (need direct network access)
-	// Containerized environments (Docker, CI) often lack CAP_NET_ADMIN
-	if features.CanUnshareNet && !hasWildcardAllow {
+	// Always use --unshare-net when available (network namespace isolation)
+	// Inside the namespace, tun2socks will provide transparent proxy access
+	if features.CanUnshareNet {
 		bwrapArgs = append(bwrapArgs, "--unshare-net") // Network namespace isolation
-	} else if opts.Debug && !features.CanUnshareNet {
+	} else if opts.Debug {
 		fmt.Fprintf(os.Stderr, "[fence:linux] Skipping --unshare-net (network namespace unavailable in this environment)\n")
 	}
 
@@ -603,12 +585,19 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, bridge *Lin
 		}
 	}
 
-	// Bind the outbound Unix sockets into the sandbox (need to be writable)
-	if bridge != nil {
+	// Bind the proxy bridge Unix socket into the sandbox (needs to be writable)
+	if proxyBridge != nil {
 		bwrapArgs = append(bwrapArgs,
-			"--bind", bridge.HTTPSocketPath, bridge.HTTPSocketPath,
-			"--bind", bridge.SOCKSSocketPath, bridge.SOCKSSocketPath,
+			"--bind", proxyBridge.SocketPath, proxyBridge.SocketPath,
 		)
+		// Bind /dev/net/tun for TUN device creation inside the sandbox
+		if features.HasDevNetTun {
+			bwrapArgs = append(bwrapArgs, "--dev-bind", "/dev/net/tun", "/dev/net/tun")
+		}
+		// Bind the tun2socks binary into the sandbox (read-only)
+		if tun2socksPath != "" {
+			bwrapArgs = append(bwrapArgs, "--ro-bind", tun2socksPath, "/tmp/fence-tun2socks")
+		}
 	}
 
 	// Bind reverse socket directory if needed (sockets created inside sandbox)
@@ -637,32 +626,48 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, bridge *Lin
 
 	bwrapArgs = append(bwrapArgs, "--", shellPath, "-c")
 
-	// Build the inner command that sets up socat listeners and runs the user command
+	// Build the inner command that sets up tun2socks and runs the user command
 	var innerScript strings.Builder
 
-	if bridge != nil {
-		// Set up outbound socat listeners inside the sandbox
+	innerScript.WriteString("export FENCE_SANDBOX=1\n")
+
+	if proxyBridge != nil && tun2socksPath != "" && features.CanUseTransparentProxy() {
+		// Set up transparent proxy via TUN device + tun2socks
 		innerScript.WriteString(fmt.Sprintf(`
-# Start HTTP proxy listener (port 3128 -> Unix socket -> host HTTP proxy)
-socat TCP-LISTEN:3128,fork,reuseaddr UNIX-CONNECT:%s >/dev/null 2>&1 &
-HTTP_PID=$!
+# Set up TUN device for transparent proxying
+ip tuntap add dev tun0 mode tun
+ip addr add 198.18.0.1/15 dev tun0
+ip link set dev tun0 up
+ip route add default via 198.18.0.1 dev tun0
 
-# Start SOCKS proxy listener (port 1080 -> Unix socket -> host SOCKS proxy)
-socat TCP-LISTEN:1080,fork,reuseaddr UNIX-CONNECT:%s >/dev/null 2>&1 &
-SOCKS_PID=$!
+# Bridge: local port -> Unix socket -> host -> external SOCKS5 proxy
+PROXY_PORT=18321
+socat TCP-LISTEN:${PROXY_PORT},fork,reuseaddr,bind=127.0.0.1 UNIX-CONNECT:%s >/dev/null 2>&1 &
+BRIDGE_PID=$!
 
-# Set proxy environment variables
-export HTTP_PROXY=http://127.0.0.1:3128
-export HTTPS_PROXY=http://127.0.0.1:3128
-export http_proxy=http://127.0.0.1:3128
-export https_proxy=http://127.0.0.1:3128
-export ALL_PROXY=socks5h://127.0.0.1:1080
-export all_proxy=socks5h://127.0.0.1:1080
+# Start tun2socks (transparent proxy via gvisor netstack)
+/tmp/fence-tun2socks -device tun0 -proxy socks5://127.0.0.1:${PROXY_PORT} >/dev/null 2>&1 &
+TUN2SOCKS_PID=$!
+
+`, proxyBridge.SocketPath))
+	} else if proxyBridge != nil {
+		// Fallback: no TUN support, use env-var-based proxying
+		innerScript.WriteString(fmt.Sprintf(`
+# Set up SOCKS5 bridge (no TUN available, env-var-based proxying)
+PROXY_PORT=18321
+socat TCP-LISTEN:${PROXY_PORT},fork,reuseaddr,bind=127.0.0.1 UNIX-CONNECT:%s >/dev/null 2>&1 &
+BRIDGE_PID=$!
+
+export ALL_PROXY=socks5h://127.0.0.1:${PROXY_PORT}
+export all_proxy=socks5h://127.0.0.1:${PROXY_PORT}
+export HTTP_PROXY=socks5h://127.0.0.1:${PROXY_PORT}
+export HTTPS_PROXY=socks5h://127.0.0.1:${PROXY_PORT}
+export http_proxy=socks5h://127.0.0.1:${PROXY_PORT}
+export https_proxy=socks5h://127.0.0.1:${PROXY_PORT}
 export NO_PROXY=localhost,127.0.0.1
 export no_proxy=localhost,127.0.0.1
-export FENCE_SANDBOX=1
 
-`, bridge.HTTPSocketPath, bridge.SOCKSSocketPath))
+`, proxyBridge.SocketPath))
 	}
 
 	// Set up reverse (inbound) socat listeners inside the sandbox
@@ -688,8 +693,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Small delay to ensure socat listeners are ready
-sleep 0.1
+# Small delay to ensure services are ready
+sleep 0.3
 
 # Run the user command
 `)
@@ -728,6 +733,11 @@ sleep 0.1
 			featureList = append(featureList, "bwrap(network,pid,fs)")
 		} else {
 			featureList = append(featureList, "bwrap(pid,fs)")
+		}
+		if proxyBridge != nil && features.CanUseTransparentProxy() {
+			featureList = append(featureList, "tun2socks(transparent)")
+		} else if proxyBridge != nil {
+			featureList = append(featureList, "proxy(env-vars)")
 		}
 		if features.HasSeccomp && opts.UseSeccomp && seccompFilterPath != "" {
 			featureList = append(featureList, "seccomp")
@@ -818,6 +828,9 @@ func PrintLinuxFeatures() {
 	fmt.Printf("  Seccomp: %v (log level: %d)\n", features.HasSeccomp, features.SeccompLogLevel)
 	fmt.Printf("  Landlock: %v (ABI v%d)\n", features.HasLandlock, features.LandlockABI)
 	fmt.Printf("  eBPF: %v (CAP_BPF: %v, root: %v)\n", features.HasEBPF, features.HasCapBPF, features.HasCapRoot)
+	fmt.Printf("  ip (iproute2): %v\n", features.HasIpCommand)
+	fmt.Printf("  /dev/net/tun: %v\n", features.HasDevNetTun)
+	fmt.Printf("  tun2socks: %v (embedded)\n", features.HasTun2Socks)
 
 	fmt.Printf("\nFeature Status:\n")
 	if features.MinimumViable() {
@@ -839,6 +852,12 @@ func PrintLinuxFeatures() {
 		fmt.Printf("  ⚠ Network namespace unavailable (containerized environment?)\n")
 		fmt.Printf("    Sandbox will still work but with reduced network isolation.\n")
 		fmt.Printf("    This is common in Docker, GitHub Actions, and other CI systems.\n")
+	}
+
+	if features.CanUseTransparentProxy() {
+		fmt.Printf("  ✓ Transparent proxy available (tun2socks + TUN device)\n")
+	} else {
+		fmt.Printf("  ○ Transparent proxy not available (needs ip, /dev/net/tun, network namespace)\n")
 	}
 
 	if features.CanUseLandlock() {

@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -49,13 +48,14 @@ func NormalizePath(pathPattern string) string {
 }
 
 // GenerateProxyEnvVars creates environment variables for proxy configuration.
-func GenerateProxyEnvVars(httpPort, socksPort int) []string {
+// Used on macOS where transparent proxying is not available.
+func GenerateProxyEnvVars(proxyURL string) []string {
 	envVars := []string{
 		"FENCE_SANDBOX=1",
 		"TMPDIR=/tmp/fence",
 	}
 
-	if httpPort == 0 && socksPort == 0 {
+	if proxyURL == "" {
 		return envVars
 	}
 
@@ -75,31 +75,13 @@ func GenerateProxyEnvVars(httpPort, socksPort int) []string {
 	envVars = append(envVars,
 		"NO_PROXY="+noProxy,
 		"no_proxy="+noProxy,
+		"ALL_PROXY="+proxyURL,
+		"all_proxy="+proxyURL,
+		"HTTP_PROXY="+proxyURL,
+		"HTTPS_PROXY="+proxyURL,
+		"http_proxy="+proxyURL,
+		"https_proxy="+proxyURL,
 	)
-
-	if httpPort > 0 {
-		proxyURL := "http://localhost:" + itoa(httpPort)
-		envVars = append(envVars,
-			"HTTP_PROXY="+proxyURL,
-			"HTTPS_PROXY="+proxyURL,
-			"http_proxy="+proxyURL,
-			"https_proxy="+proxyURL,
-		)
-	}
-
-	if socksPort > 0 {
-		socksURL := "socks5h://localhost:" + itoa(socksPort)
-		envVars = append(envVars,
-			"ALL_PROXY="+socksURL,
-			"all_proxy="+socksURL,
-			"FTP_PROXY="+socksURL,
-			"ftp_proxy="+socksURL,
-		)
-		// Git SSH through SOCKS
-		envVars = append(envVars,
-			"GIT_SSH_COMMAND=ssh -o ProxyCommand='nc -X 5 -x localhost:"+itoa(socksPort)+" %h %p'",
-		)
-	}
 
 	return envVars
 }
@@ -121,6 +103,3 @@ func DecodeSandboxedCommand(encoded string) (string, error) {
 	return string(data), nil
 }
 
-func itoa(n int) string {
-	return strconv.Itoa(n)
-}

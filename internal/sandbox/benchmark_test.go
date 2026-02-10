@@ -312,9 +312,7 @@ func skipBenchIfSandboxed(b *testing.B) {
 
 func benchConfig(workspace string) *config.Config {
 	return &config.Config{
-		Network: config.NetworkConfig{
-			AllowedDomains: []string{},
-		},
+		Network: config.NetworkConfig{},
 		Filesystem: config.FilesystemConfig{
 			AllowWrite: []string{workspace},
 		},
