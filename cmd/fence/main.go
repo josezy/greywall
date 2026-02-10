@@ -28,6 +28,7 @@ var (
 	monitor       bool
 	settingsPath  string
 	proxyURL      string
+	dnsAddr       string
 	cmdString     string
 	exposePorts   []string
 	exitCode      int
@@ -92,6 +93,7 @@ Configuration file format:
 	rootCmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "Monitor and log sandbox violations")
 	rootCmd.Flags().StringVarP(&settingsPath, "settings", "s", "", "Path to settings file (default: OS config directory)")
 	rootCmd.Flags().StringVar(&proxyURL, "proxy", "", "External SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
+	rootCmd.Flags().StringVar(&dnsAddr, "dns", "", "DNS server address on host (e.g., localhost:3153)")
 	rootCmd.Flags().StringVarP(&cmdString, "c", "c", "", "Run command string directly (like sh -c)")
 	rootCmd.Flags().StringArrayVarP(&exposePorts, "port", "p", nil, "Expose port for inbound connections (can be used multiple times)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Show version information")
@@ -173,9 +175,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// CLI --proxy flag overrides config
+	// CLI flags override config
 	if proxyURL != "" {
 		cfg.Network.ProxyURL = proxyURL
+	}
+	if dnsAddr != "" {
+		cfg.Network.DnsAddr = dnsAddr
 	}
 
 	manager := sandbox.NewManager(cfg, debug, monitor)

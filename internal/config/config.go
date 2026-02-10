@@ -27,6 +27,7 @@ type Config struct {
 // NetworkConfig defines network restrictions.
 type NetworkConfig struct {
 	ProxyURL            string   `json:"proxyUrl,omitempty"`            // External SOCKS5 proxy (e.g. socks5://host:1080)
+	DnsAddr             string   `json:"dnsAddr,omitempty"`             // DNS server address on host (e.g. localhost:3153)
 	AllowUnixSockets    []string `json:"allowUnixSockets,omitempty"`
 	AllowAllUnixSockets bool     `json:"allowAllUnixSockets,omitempty"`
 	AllowLocalBinding   bool     `json:"allowLocalBinding,omitempty"`
@@ -196,6 +197,11 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("invalid network.proxyUrl %q: %w", c.Network.ProxyURL, err)
 		}
 	}
+	if c.Network.DnsAddr != "" {
+		if err := validateHostPort(c.Network.DnsAddr); err != nil {
+			return fmt.Errorf("invalid network.dnsAddr %q: %w", c.Network.DnsAddr, err)
+		}
+	}
 
 	if slices.Contains(c.Filesystem.AllowRead, "") {
 		return errors.New("filesystem.allowRead contains empty path")
@@ -257,6 +263,16 @@ func validateProxyURL(proxyURL string) error {
 	}
 	if u.Port() == "" {
 		return errors.New("proxy URL must include a port")
+	}
+	return nil
+}
+
+// validateHostPort validates a host:port address.
+func validateHostPort(addr string) error {
+	// Must contain a colon separating host and port
+	host, port, found := strings.Cut(addr, ":")
+	if !found || host == "" || port == "" {
+		return errors.New("must be in host:port format (e.g. localhost:3153)")
 	}
 	return nil
 }
@@ -385,8 +401,9 @@ func Merge(base, override *Config) *Config {
 		AllowPty: base.AllowPty || override.AllowPty,
 
 		Network: NetworkConfig{
-			// ProxyURL: override wins if non-empty
+			// ProxyURL/DnsAddr: override wins if non-empty
 			ProxyURL: mergeString(base.Network.ProxyURL, override.Network.ProxyURL),
+			DnsAddr:  mergeString(base.Network.DnsAddr, override.Network.DnsAddr),
 
 			// Append slices (base first, then override additions)
 			AllowUnixSockets: mergeStrings(base.Network.AllowUnixSockets, override.Network.AllowUnixSockets),

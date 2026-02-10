@@ -20,11 +20,86 @@ import (
 
 // ProxyBridge bridges sandbox to an external SOCKS5 proxy via Unix socket.
 type ProxyBridge struct {
-	SocketPath string // Unix socket path
-	ProxyHost  string // Parsed from ProxyURL
-	ProxyPort  string // Parsed from ProxyURL
+	SocketPath string    // Unix socket path
+	ProxyHost  string    // Parsed from ProxyURL
+	ProxyPort  string    // Parsed from ProxyURL
+	ProxyUser  string    // Username from ProxyURL (if any)
+	ProxyPass  string    // Password from ProxyURL (if any)
+	HasAuth    bool      // Whether credentials were provided
 	process    *exec.Cmd
 	debug      bool
+}
+
+// DnsBridge bridges DNS queries from the sandbox to a host-side DNS server via Unix socket.
+// Inside the sandbox, a socat relay converts UDP DNS queries (port 53) to the Unix socket.
+// On the host, socat forwards from the Unix socket to the actual DNS server (TCP).
+type DnsBridge struct {
+	SocketPath string // Unix socket path
+	DnsAddr    string // Host-side DNS address (host:port)
+	process    *exec.Cmd
+	debug      bool
+}
+
+// NewDnsBridge creates a Unix socket bridge to a host-side DNS server.
+func NewDnsBridge(dnsAddr string, debug bool) (*DnsBridge, error) {
+	if _, err := exec.LookPath("socat"); err != nil {
+		return nil, fmt.Errorf("socat is required for DNS bridge: %w", err)
+	}
+
+	id := make([]byte, 8)
+	if _, err := rand.Read(id); err != nil {
+		return nil, fmt.Errorf("failed to generate socket ID: %w", err)
+	}
+	socketID := hex.EncodeToString(id)
+
+	tmpDir := os.TempDir()
+	socketPath := filepath.Join(tmpDir, fmt.Sprintf("fence-dns-%s.sock", socketID))
+
+	bridge := &DnsBridge{
+		SocketPath: socketPath,
+		DnsAddr:    dnsAddr,
+		debug:      debug,
+	}
+
+	// Start bridge: Unix socket -> DNS server TCP
+	socatArgs := []string{
+		fmt.Sprintf("UNIX-LISTEN:%s,fork,reuseaddr", socketPath),
+		fmt.Sprintf("TCP:%s", dnsAddr),
+	}
+	bridge.process = exec.Command("socat", socatArgs...) //nolint:gosec // args constructed from trusted input
+	if debug {
+		fmt.Fprintf(os.Stderr, "[fence:linux] Starting DNS bridge: socat %s\n", strings.Join(socatArgs, " "))
+	}
+	if err := bridge.process.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start DNS bridge: %w", err)
+	}
+
+	// Wait for socket to be created
+	for range 50 {
+		if fileExists(socketPath) {
+			if debug {
+				fmt.Fprintf(os.Stderr, "[fence:linux] DNS bridge ready (%s -> %s)\n", socketPath, dnsAddr)
+			}
+			return bridge, nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	bridge.Cleanup()
+	return nil, fmt.Errorf("timeout waiting for DNS bridge socket to be created")
+}
+
+// Cleanup stops the DNS bridge and removes the socket file.
+func (b *DnsBridge) Cleanup() {
+	if b.process != nil && b.process.Process != nil {
+		_ = b.process.Process.Kill()
+		_ = b.process.Wait()
+	}
+	_ = os.Remove(b.SocketPath)
+
+	if b.debug {
+		fmt.Fprintf(os.Stderr, "[fence:linux] DNS bridge cleaned up\n")
+	}
 }
 
 // ReverseBridge holds the socat bridge processes for inbound connections.
@@ -75,6 +150,13 @@ func NewProxyBridge(proxyURL string, debug bool) (*ProxyBridge, error) {
 		ProxyHost:  u.Hostname(),
 		ProxyPort:  u.Port(),
 		debug:      debug,
+	}
+
+	// Capture credentials from the proxy URL (if any)
+	if u.User != nil {
+		bridge.HasAuth = true
+		bridge.ProxyUser = u.User.Username()
+		bridge.ProxyPass, _ = u.User.Password()
 	}
 
 	// Start bridge: Unix socket -> external SOCKS5 proxy TCP
@@ -305,8 +387,8 @@ func getMandatoryDenyPaths(cwd string) []string {
 
 // WrapCommandLinux wraps a command with Linux bubblewrap sandbox.
 // It uses available security features (Landlock, seccomp) with graceful fallback.
-func WrapCommandLinux(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, debug bool) (string, error) {
-	return WrapCommandLinuxWithOptions(cfg, command, proxyBridge, reverseBridge, tun2socksPath, LinuxSandboxOptions{
+func WrapCommandLinux(cfg *config.Config, command string, proxyBridge *ProxyBridge, dnsBridge *DnsBridge, reverseBridge *ReverseBridge, tun2socksPath string, debug bool) (string, error) {
+	return WrapCommandLinuxWithOptions(cfg, command, proxyBridge, dnsBridge, reverseBridge, tun2socksPath, LinuxSandboxOptions{
 		UseLandlock: true, // Enabled by default, will fall back if not available
 		UseSeccomp:  true, // Enabled by default
 		UseEBPF:     true, // Enabled by default if available
@@ -315,7 +397,7 @@ func WrapCommandLinux(cfg *config.Config, command string, proxyBridge *ProxyBrid
 }
 
 // WrapCommandLinuxWithOptions wraps a command with configurable sandbox options.
-func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, opts LinuxSandboxOptions) (string, error) {
+func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge *ProxyBridge, dnsBridge *DnsBridge, reverseBridge *ReverseBridge, tun2socksPath string, opts LinuxSandboxOptions) (string, error) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		return "", fmt.Errorf("bubblewrap (bwrap) is required on Linux but not found: %w", err)
 	}
@@ -586,17 +668,49 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge
 	}
 
 	// Bind the proxy bridge Unix socket into the sandbox (needs to be writable)
+	var dnsRelayResolvConf string // temp file path for custom resolv.conf
 	if proxyBridge != nil {
 		bwrapArgs = append(bwrapArgs,
 			"--bind", proxyBridge.SocketPath, proxyBridge.SocketPath,
 		)
-		// Bind /dev/net/tun for TUN device creation inside the sandbox
-		if features.HasDevNetTun {
-			bwrapArgs = append(bwrapArgs, "--dev-bind", "/dev/net/tun", "/dev/net/tun")
-		}
-		// Bind the tun2socks binary into the sandbox (read-only)
-		if tun2socksPath != "" {
+		if tun2socksPath != "" && features.CanUseTransparentProxy() {
+			// Bind /dev/net/tun for TUN device creation inside the sandbox
+			if features.HasDevNetTun {
+				bwrapArgs = append(bwrapArgs, "--dev-bind", "/dev/net/tun", "/dev/net/tun")
+			}
+			// Preserve CAP_NET_ADMIN (TUN device + network config) and
+			// CAP_NET_BIND_SERVICE (DNS relay on port 53) inside the namespace
+			bwrapArgs = append(bwrapArgs, "--cap-add", "CAP_NET_ADMIN")
+			bwrapArgs = append(bwrapArgs, "--cap-add", "CAP_NET_BIND_SERVICE")
+			// Bind the tun2socks binary into the sandbox (read-only)
 			bwrapArgs = append(bwrapArgs, "--ro-bind", tun2socksPath, "/tmp/fence-tun2socks")
+		}
+
+		// Bind DNS bridge socket if available
+		if dnsBridge != nil {
+			bwrapArgs = append(bwrapArgs,
+				"--bind", dnsBridge.SocketPath, dnsBridge.SocketPath,
+			)
+		}
+
+		// Override /etc/resolv.conf to point DNS at our local relay (port 53).
+		// Inside the sandbox, a socat relay on UDP :53 converts queries to the
+		// DNS bridge (Unix socket -> host DNS server) or to TCP through the tunnel.
+		if dnsBridge != nil || (tun2socksPath != "" && features.CanUseTransparentProxy()) {
+			tmpResolv, err := os.CreateTemp("", "fence-resolv-*.conf")
+			if err == nil {
+				_, _ = tmpResolv.WriteString("nameserver 127.0.0.1\n")
+				tmpResolv.Close()
+				dnsRelayResolvConf = tmpResolv.Name()
+				bwrapArgs = append(bwrapArgs, "--ro-bind", dnsRelayResolvConf, "/etc/resolv.conf")
+				if opts.Debug {
+					if dnsBridge != nil {
+						fmt.Fprintf(os.Stderr, "[fence:linux] DNS: overriding resolv.conf -> 127.0.0.1 (bridge to %s)\n", dnsBridge.DnsAddr)
+					} else {
+						fmt.Fprintf(os.Stderr, "[fence:linux] DNS: overriding resolv.conf -> 127.0.0.1 (TCP relay through tunnel)\n")
+					}
+				}
+			}
 		}
 	}
 
@@ -632,8 +746,21 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge
 	innerScript.WriteString("export FENCE_SANDBOX=1\n")
 
 	if proxyBridge != nil && tun2socksPath != "" && features.CanUseTransparentProxy() {
+		// Build the tun2socks proxy URL with credentials if available
+		// Many SOCKS5 proxies require the username/password auth flow even
+		// without real credentials (e.g., gost always selects method 0x02).
+		// Including userinfo ensures tun2socks offers both auth methods.
+		tun2socksProxyURL := "socks5://127.0.0.1:${PROXY_PORT}"
+		if proxyBridge.HasAuth {
+			userinfo := url.UserPassword(proxyBridge.ProxyUser, proxyBridge.ProxyPass)
+			tun2socksProxyURL = fmt.Sprintf("socks5://%s@127.0.0.1:${PROXY_PORT}", userinfo.String())
+		}
+
 		// Set up transparent proxy via TUN device + tun2socks
 		innerScript.WriteString(fmt.Sprintf(`
+# Bring up loopback interface (needed for socat to bind on 127.0.0.1)
+ip link set lo up
+
 # Set up TUN device for transparent proxying
 ip tuntap add dev tun0 mode tun
 ip addr add 198.18.0.1/15 dev tun0
@@ -646,13 +773,33 @@ socat TCP-LISTEN:${PROXY_PORT},fork,reuseaddr,bind=127.0.0.1 UNIX-CONNECT:%s >/d
 BRIDGE_PID=$!
 
 # Start tun2socks (transparent proxy via gvisor netstack)
-/tmp/fence-tun2socks -device tun0 -proxy socks5://127.0.0.1:${PROXY_PORT} >/dev/null 2>&1 &
+/tmp/fence-tun2socks -device tun0 -proxy %s >/dev/null 2>&1 &
 TUN2SOCKS_PID=$!
 
-`, proxyBridge.SocketPath))
+`, proxyBridge.SocketPath, tun2socksProxyURL))
+
+		// DNS relay: convert UDP DNS queries on port 53 so apps can resolve names.
+		if dnsBridge != nil {
+			// Dedicated DNS bridge: UDP :53 -> Unix socket -> host DNS server
+			innerScript.WriteString(fmt.Sprintf(`# DNS relay: UDP queries -> Unix socket -> host DNS server (%s)
+socat UDP4-RECVFROM:53,fork,reuseaddr UNIX-CONNECT:%s >/dev/null 2>&1 &
+DNS_RELAY_PID=$!
+
+`, dnsBridge.DnsAddr, dnsBridge.SocketPath))
+		} else {
+			// Fallback: UDP :53 -> TCP to public DNS through the tunnel
+			innerScript.WriteString(`# DNS relay: UDP queries -> TCP 1.1.1.1:53 (through tun2socks tunnel)
+socat UDP4-RECVFROM:53,fork,reuseaddr TCP:1.1.1.1:53 >/dev/null 2>&1 &
+DNS_RELAY_PID=$!
+
+`)
+		}
 	} else if proxyBridge != nil {
 		// Fallback: no TUN support, use env-var-based proxying
 		innerScript.WriteString(fmt.Sprintf(`
+# Bring up loopback interface (needed for socat to bind on 127.0.0.1)
+ip link set lo up 2>/dev/null
+
 # Set up SOCKS5 bridge (no TUN available, env-var-based proxying)
 PROXY_PORT=18321
 socat TCP-LISTEN:${PROXY_PORT},fork,reuseaddr,bind=127.0.0.1 UNIX-CONNECT:%s >/dev/null 2>&1 &

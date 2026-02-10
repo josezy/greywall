@@ -15,6 +15,12 @@ type ProxyBridge struct {
 	ProxyPort  string
 }
 
+// DnsBridge is a stub for non-Linux platforms.
+type DnsBridge struct {
+	SocketPath string
+	DnsAddr    string
+}
+
 // ReverseBridge is a stub for non-Linux platforms.
 type ReverseBridge struct {
 	Ports       []int
@@ -38,6 +44,14 @@ func NewProxyBridge(proxyURL string, debug bool) (*ProxyBridge, error) {
 // Cleanup is a no-op on non-Linux platforms.
 func (b *ProxyBridge) Cleanup() {}
 
+// NewDnsBridge returns an error on non-Linux platforms.
+func NewDnsBridge(dnsAddr string, debug bool) (*DnsBridge, error) {
+	return nil, fmt.Errorf("DNS bridge not available on this platform")
+}
+
+// Cleanup is a no-op on non-Linux platforms.
+func (b *DnsBridge) Cleanup() {}
+
 // NewReverseBridge returns an error on non-Linux platforms.
 func NewReverseBridge(ports []int, debug bool) (*ReverseBridge, error) {
 	return nil, fmt.Errorf("reverse bridge not available on this platform")
@@ -47,12 +61,12 @@ func NewReverseBridge(ports []int, debug bool) (*ReverseBridge, error) {
 func (b *ReverseBridge) Cleanup() {}
 
 // WrapCommandLinux returns an error on non-Linux platforms.
-func WrapCommandLinux(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, debug bool) (string, error) {
+func WrapCommandLinux(cfg *config.Config, command string, proxyBridge *ProxyBridge, dnsBridge *DnsBridge, reverseBridge *ReverseBridge, tun2socksPath string, debug bool) (string, error) {
 	return "", fmt.Errorf("Linux sandbox not available on this platform")
 }
 
 // WrapCommandLinuxWithOptions returns an error on non-Linux platforms.
-func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge *ProxyBridge, reverseBridge *ReverseBridge, tun2socksPath string, opts LinuxSandboxOptions) (string, error) {
+func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge *ProxyBridge, dnsBridge *DnsBridge, reverseBridge *ReverseBridge, tun2socksPath string, opts LinuxSandboxOptions) (string, error) {
 	return "", fmt.Errorf("Linux sandbox not available on this platform")
 }
 

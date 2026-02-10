@@ -12,6 +12,7 @@ import (
 type Manager struct {
 	config        *config.Config
 	proxyBridge   *ProxyBridge
+	dnsBridge     *DnsBridge
 	reverseBridge *ReverseBridge
 	tun2socksPath string // path to extracted tun2socks binary on host
 	exposedPorts  []int
@@ -64,6 +65,19 @@ func (m *Manager) Initialize() error {
 				return fmt.Errorf("failed to initialize proxy bridge: %w", err)
 			}
 			m.proxyBridge = bridge
+
+			// Create DNS bridge if a DNS server is configured
+			if m.config.Network.DnsAddr != "" {
+				dnsBridge, err := NewDnsBridge(m.config.Network.DnsAddr, m.debug)
+				if err != nil {
+					m.proxyBridge.Cleanup()
+					if m.tun2socksPath != "" {
+						os.Remove(m.tun2socksPath)
+					}
+					return fmt.Errorf("failed to initialize DNS bridge: %w", err)
+				}
+				m.dnsBridge = dnsBridge
+			}
 		}
 
 		// Set up reverse bridge for exposed ports (inbound connections)
@@ -114,7 +128,7 @@ func (m *Manager) WrapCommand(command string) (string, error) {
 	case platform.MacOS:
 		return WrapCommandMacOS(m.config, command, m.exposedPorts, m.debug)
 	case platform.Linux:
-		return WrapCommandLinux(m.config, command, m.proxyBridge, m.reverseBridge, m.tun2socksPath, m.debug)
+		return WrapCommandLinux(m.config, command, m.proxyBridge, m.dnsBridge, m.reverseBridge, m.tun2socksPath, m.debug)
 	default:
 		return "", fmt.Errorf("unsupported platform: %s", plat)
 	}
@@ -124,6 +138,9 @@ func (m *Manager) WrapCommand(command string) (string, error) {
 func (m *Manager) Cleanup() {
 	if m.reverseBridge != nil {
 		m.reverseBridge.Cleanup()
+	}
+	if m.dnsBridge != nil {
+		m.dnsBridge.Cleanup()
 	}
 	if m.proxyBridge != nil {
 		m.proxyBridge.Cleanup()
