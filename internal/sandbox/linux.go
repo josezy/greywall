@@ -422,9 +422,15 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge
 	// Build bwrap args with filesystem restrictions
 	bwrapArgs := []string{
 		"bwrap",
-		"--new-session",
-		"--die-with-parent",
 	}
+	// --new-session calls setsid() which detaches from the controlling terminal.
+	// Skip it in learning mode so interactive programs (TUIs, prompts) can
+	// read from /dev/tty. Learning mode already relaxes security constraints
+	// (no seccomp, no landlock), so skipping new-session is acceptable.
+	if !opts.Learning {
+		bwrapArgs = append(bwrapArgs, "--new-session")
+	}
+	bwrapArgs = append(bwrapArgs, "--die-with-parent")
 
 	// Always use --unshare-net when available (network namespace isolation)
 	// Inside the namespace, tun2socks will provide transparent proxy access
@@ -886,43 +892,21 @@ sleep 0.3
 `)
 
 	// In learning mode, wrap the command with strace to trace syscalls.
-	// strace -f follows forked children, which means it hangs if the app spawns
-	// long-lived child processes (LSP servers, file watchers, etc.).
-	// To handle this, we run strace in the background and spawn a monitor that
-	// detects when the main command (strace's direct child) exits by polling
-	// /proc/STRACE_PID/task/STRACE_PID/children, then kills strace.
+	// Run strace in the foreground so the traced command retains terminal
+	// access (stdin, /dev/tty) for interactive programs like TUIs.
+	// If the app spawns long-lived child processes, strace -f may hang
+	// after the main command exits; the user can Ctrl+C to stop it.
+	// A SIGCHLD trap kills strace once its direct child exits, handling
+	// the common case of background daemons (LSP servers, watchers).
 	if opts.Learning && opts.StraceLogPath != "" {
-		innerScript.WriteString(fmt.Sprintf(`# Learning mode: trace filesystem access
-strace -f -qq -I2 -e trace=openat,open,creat,mkdir,mkdirat,unlinkat,renameat,renameat2,symlinkat,linkat -o %s -- %s &
-GREYWALL_STRACE_PID=$!
-
-# Monitor: detect when the main command exits, then kill strace.
-# strace's direct child is the command. When it exits, the children file
-# becomes empty (grandchildren are reparented to init in the PID namespace).
-(
-    sleep 1
-    while kill -0 $GREYWALL_STRACE_PID 2>/dev/null; do
-        CHILDREN=$(cat /proc/$GREYWALL_STRACE_PID/task/$GREYWALL_STRACE_PID/children 2>/dev/null)
-        if [ -z "$CHILDREN" ]; then
-            sleep 0.5
-            kill $GREYWALL_STRACE_PID 2>/dev/null
-            break
-        fi
-        sleep 1
-    done
-) &
-GREYWALL_MONITOR_PID=$!
-
-trap 'kill -INT $GREYWALL_STRACE_PID 2>/dev/null' INT
-trap 'kill -TERM $GREYWALL_STRACE_PID 2>/dev/null' TERM
-wait $GREYWALL_STRACE_PID 2>/dev/null
-kill $GREYWALL_MONITOR_PID 2>/dev/null
-wait $GREYWALL_MONITOR_PID 2>/dev/null
+		innerScript.WriteString(fmt.Sprintf(`# Learning mode: trace filesystem access (foreground for terminal access)
+strace -f -qq -I2 -e trace=openat,open,creat,mkdir,mkdirat,unlinkat,renameat,renameat2,symlinkat,linkat -o %s -- %s
+GREYWALL_STRACE_EXIT=$?
 # Kill any orphaned child processes (LSP servers, file watchers, etc.)
 # that were spawned by the traced command and reparented to PID 1.
-# Without this, greywall hangs until they exit (they hold pipe FDs open).
 kill -TERM -1 2>/dev/null
 sleep 0.1
+exit $GREYWALL_STRACE_EXIT
 `,
 			ShellQuoteSingle(opts.StraceLogPath), command,
 		))

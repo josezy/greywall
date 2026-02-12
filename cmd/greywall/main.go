@@ -355,25 +355,32 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Wait for command to finish
+	commandFailed := false
 	if err := execCmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			// Set exit code but don't os.Exit() here - let deferred cleanup run
 			exitCode = exitErr.ExitCode()
-			// Continue to template generation even if command exited non-zero
+			commandFailed = true
 		} else {
 			return fmt.Errorf("command failed: %w", err)
 		}
 	}
 
-	// Generate learned template after command completes
+	// Generate learned template after command completes successfully.
+	// Skip template generation if the command failed — the strace trace
+	// is likely incomplete and would produce an unreliable template.
 	if learning && manager.IsLearning() {
-		fmt.Fprintf(os.Stderr, "[greywall] Analyzing filesystem access patterns...\n")
-		templatePath, genErr := manager.GenerateLearnedTemplate(cmdName)
-		if genErr != nil {
-			fmt.Fprintf(os.Stderr, "[greywall] Warning: failed to generate template: %v\n", genErr)
+		if commandFailed {
+			fmt.Fprintf(os.Stderr, "[greywall] Skipping template generation: command exited with code %d\n", exitCode)
 		} else {
-			fmt.Fprintf(os.Stderr, "[greywall] Template saved to: %s\n", templatePath)
-			fmt.Fprintf(os.Stderr, "[greywall] Next run will auto-load this template.\n")
+			fmt.Fprintf(os.Stderr, "[greywall] Analyzing filesystem access patterns...\n")
+			templatePath, genErr := manager.GenerateLearnedTemplate(cmdName)
+			if genErr != nil {
+				fmt.Fprintf(os.Stderr, "[greywall] Warning: failed to generate template: %v\n", genErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "[greywall] Template saved to: %s\n", templatePath)
+				fmt.Fprintf(os.Stderr, "[greywall] Next run will auto-load this template.\n")
+			}
 		}
 	}
 
