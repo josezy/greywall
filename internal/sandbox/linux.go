@@ -32,7 +32,7 @@ type ProxyBridge struct {
 
 // DnsBridge bridges DNS queries from the sandbox to a host-side DNS server via Unix socket.
 // Inside the sandbox, a socat relay converts UDP DNS queries (port 53) to the Unix socket.
-// On the host, socat forwards from the Unix socket to the actual DNS server (TCP).
+// On the host, socat forwards from the Unix socket to the actual DNS server (UDP).
 type DnsBridge struct {
 	SocketPath string // Unix socket path
 	DnsAddr    string // Host-side DNS address (host:port)
@@ -61,10 +61,10 @@ func NewDnsBridge(dnsAddr string, debug bool) (*DnsBridge, error) {
 		debug:      debug,
 	}
 
-	// Start bridge: Unix socket -> DNS server TCP
+	// Start bridge: Unix socket -> DNS server UDP
 	socatArgs := []string{
 		fmt.Sprintf("UNIX-LISTEN:%s,fork,reuseaddr", socketPath),
-		fmt.Sprintf("TCP:%s", dnsAddr),
+		fmt.Sprintf("UDP:%s", dnsAddr),
 	}
 	bridge.process = exec.Command("socat", socatArgs...) //nolint:gosec // args constructed from trusted input
 	if debug {
