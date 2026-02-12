@@ -99,7 +99,7 @@ Configuration file format:
 	rootCmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "Monitor and log sandbox violations")
 	rootCmd.Flags().StringVarP(&settingsPath, "settings", "s", "", "Path to settings file (default: OS config directory)")
 	rootCmd.Flags().StringVar(&proxyURL, "proxy", "", "External SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
-	rootCmd.Flags().StringVar(&dnsAddr, "dns", "", "DNS server address on host (e.g., localhost:3153)")
+	rootCmd.Flags().StringVar(&dnsAddr, "dns", "", "DNS server address on host (default: localhost:5353 when proxy is set)")
 	rootCmd.Flags().StringVarP(&cmdString, "c", "c", "", "Run command string directly (like sh -c)")
 	rootCmd.Flags().StringArrayVarP(&exposePorts, "port", "p", nil, "Expose port for inbound connections (can be used multiple times)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Show version information")
@@ -229,14 +229,31 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		cfg.Network.DnsAddr = dnsAddr
 	}
 
-	// Auto-inject command name as SOCKS5 proxy username when no credentials are set.
-	// This lets the proxy identify which sandboxed command originated the traffic.
-	if cfg.Network.ProxyURL != "" && cmdName != "" {
-		if u, err := url.Parse(cfg.Network.ProxyURL); err == nil && u.User == nil {
-			u.User = url.User(cmdName)
+	// Default DNS to localhost:5353 when proxy is configured but no DNS address
+	// is specified. GreyHaven typically runs a DNS server on this port, and using
+	// a dedicated DNS bridge ensures DNS queries go through controlled infrastructure
+	// rather than leaking to public resolvers.
+	if cfg.Network.ProxyURL != "" && cfg.Network.DnsAddr == "" {
+		cfg.Network.DnsAddr = "localhost:5353"
+		if debug {
+			fmt.Fprintf(os.Stderr, "[greywall] Defaulting DNS to localhost:5353 (proxy configured, no --dns specified)\n")
+		}
+	}
+
+	// Auto-inject proxy credentials so the proxy can identify the sandboxed command.
+	// - If a command name is available, use it as the username with "proxy" as password.
+	// - If no command name, default to "proxy:proxy" (required by gost for auth).
+	// This always overrides any existing credentials in the URL.
+	if cfg.Network.ProxyURL != "" {
+		if u, err := url.Parse(cfg.Network.ProxyURL); err == nil {
+			proxyUser := "proxy"
+			if cmdName != "" {
+				proxyUser = cmdName
+			}
+			u.User = url.UserPassword(proxyUser, "proxy")
 			cfg.Network.ProxyURL = u.String()
 			if debug {
-				fmt.Fprintf(os.Stderr, "[greywall] Auto-set proxy username to %q\n", cmdName)
+				fmt.Fprintf(os.Stderr, "[greywall] Auto-set proxy credentials to %q:proxy\n", proxyUser)
 			}
 		}
 	}
