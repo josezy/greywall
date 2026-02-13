@@ -371,6 +371,12 @@ func getMandatoryDenyPaths(cwd string) []string {
 		paths = append(paths, p)
 	}
 
+	// Sensitive project files (e.g. .env) in cwd
+	for _, f := range SensitiveProjectFiles {
+		p := filepath.Join(cwd, f)
+		paths = append(paths, p)
+	}
+
 	// Git hooks in cwd
 	paths = append(paths, filepath.Join(cwd, ".git/hooks"))
 
@@ -387,6 +393,193 @@ func getMandatoryDenyPaths(cwd string) []string {
 	}
 
 	return paths
+}
+
+// buildDenyByDefaultMounts builds bwrap arguments for deny-by-default filesystem isolation.
+// Starts with --tmpfs / (empty root), then selectively mounts system paths read-only,
+// CWD read-write, and user tooling paths read-only. Sensitive files within CWD are masked.
+func buildDenyByDefaultMounts(cfg *config.Config, cwd string, debug bool) []string {
+	var args []string
+	home, _ := os.UserHomeDir()
+
+	// Start with empty root
+	args = append(args, "--tmpfs", "/")
+
+	// System paths (read-only) - on modern distros (Arch, Fedora, etc.),
+	// /bin, /sbin, /lib, /lib64 are often symlinks to /usr/*. We must
+	// recreate these as symlinks via --symlink so the dynamic linker
+	// and shell can be found. Real directories get bind-mounted.
+	systemPaths := []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/run"}
+	for _, p := range systemPaths {
+		if !fileExists(p) {
+			continue
+		}
+		if isSymlink(p) {
+			// Recreate the symlink inside the sandbox (e.g., /bin -> usr/bin)
+			target, err := os.Readlink(p)
+			if err == nil {
+				args = append(args, "--symlink", target, p)
+			}
+		} else {
+			args = append(args, "--ro-bind", p, p)
+		}
+	}
+
+	// /sys needs to be accessible for system info
+	if fileExists("/sys") && canMountOver("/sys") {
+		args = append(args, "--ro-bind", "/sys", "/sys")
+	}
+
+	// CWD: create intermediary dirs and bind read-write
+	if cwd != "" && fileExists(cwd) {
+		for _, dir := range intermediaryDirs("/", cwd) {
+			// Skip dirs that are already mounted as system paths
+			if isSystemMountPoint(dir) {
+				continue
+			}
+			args = append(args, "--dir", dir)
+		}
+		args = append(args, "--bind", cwd, cwd)
+	}
+
+	// User tooling paths from GetDefaultReadablePaths() (read-only)
+	// Filter out paths already mounted (system dirs, /dev, /proc, /tmp, macOS-specific)
+	if home != "" {
+		boundDirs := make(map[string]bool)
+		for _, p := range GetDefaultReadablePaths() {
+			// Skip system paths (already bound above), special mounts, and macOS paths
+			if isSystemMountPoint(p) || p == "/dev" || p == "/proc" || p == "/sys" ||
+				p == "/tmp" || p == "/private/tmp" ||
+				strings.HasPrefix(p, "/System") || strings.HasPrefix(p, "/Library") ||
+				strings.HasPrefix(p, "/Applications") || strings.HasPrefix(p, "/private/") ||
+				strings.HasPrefix(p, "/nix") || strings.HasPrefix(p, "/snap") ||
+				p == "/usr/local" || p == "/opt/homebrew" {
+				continue
+			}
+			if !strings.HasPrefix(p, home) {
+				continue // Only user tooling paths need intermediary dirs
+			}
+			if !fileExists(p) || !canMountOver(p) {
+				continue
+			}
+			// Create intermediary dirs between root and this path
+			for _, dir := range intermediaryDirs("/", p) {
+				if !boundDirs[dir] && !isSystemMountPoint(dir) && dir != cwd {
+					boundDirs[dir] = true
+					args = append(args, "--dir", dir)
+				}
+			}
+			args = append(args, "--ro-bind", p, p)
+		}
+
+		// Shell config files in home (read-only, literal files)
+		shellConfigs := []string{".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".inputrc"}
+		homeIntermedaryAdded := boundDirs[home]
+		for _, f := range shellConfigs {
+			p := filepath.Join(home, f)
+			if fileExists(p) && canMountOver(p) {
+				if !homeIntermedaryAdded {
+					for _, dir := range intermediaryDirs("/", home) {
+						if !boundDirs[dir] && !isSystemMountPoint(dir) {
+							boundDirs[dir] = true
+							args = append(args, "--dir", dir)
+						}
+					}
+					homeIntermedaryAdded = true
+				}
+				args = append(args, "--ro-bind", p, p)
+			}
+		}
+
+		// Home tool caches (read-only, for package managers/configs)
+		homeCaches := []string{".cache", ".npm", ".cargo", ".rustup", ".local", ".config"}
+		for _, d := range homeCaches {
+			p := filepath.Join(home, d)
+			if fileExists(p) && canMountOver(p) {
+				if !homeIntermedaryAdded {
+					for _, dir := range intermediaryDirs("/", home) {
+						if !boundDirs[dir] && !isSystemMountPoint(dir) {
+							boundDirs[dir] = true
+							args = append(args, "--dir", dir)
+						}
+					}
+					homeIntermedaryAdded = true
+				}
+				args = append(args, "--ro-bind", p, p)
+			}
+		}
+	}
+
+	// User-specified allowRead paths (read-only)
+	if cfg != nil && cfg.Filesystem.AllowRead != nil {
+		boundPaths := make(map[string]bool)
+
+		expandedPaths := ExpandGlobPatterns(cfg.Filesystem.AllowRead)
+		for _, p := range expandedPaths {
+			if fileExists(p) && canMountOver(p) &&
+				!strings.HasPrefix(p, "/dev/") && !strings.HasPrefix(p, "/proc/") && !boundPaths[p] {
+				boundPaths[p] = true
+				// Create intermediary dirs if needed
+				for _, dir := range intermediaryDirs("/", p) {
+					if !isSystemMountPoint(dir) {
+						args = append(args, "--dir", dir)
+					}
+				}
+				args = append(args, "--ro-bind", p, p)
+			}
+		}
+		for _, p := range cfg.Filesystem.AllowRead {
+			normalized := NormalizePath(p)
+			if !ContainsGlobChars(normalized) && fileExists(normalized) && canMountOver(normalized) &&
+				!strings.HasPrefix(normalized, "/dev/") && !strings.HasPrefix(normalized, "/proc/") && !boundPaths[normalized] {
+				boundPaths[normalized] = true
+				for _, dir := range intermediaryDirs("/", normalized) {
+					if !isSystemMountPoint(dir) {
+						args = append(args, "--dir", dir)
+					}
+				}
+				args = append(args, "--ro-bind", normalized, normalized)
+			}
+		}
+	}
+
+	// Mask sensitive project files within CWD by overlaying an empty regular file.
+	// We use an empty file instead of /dev/null because Landlock's READ_FILE right
+	// doesn't cover character devices, causing "Permission denied" on /dev/null mounts.
+	if cwd != "" {
+		var emptyFile string
+		for _, f := range SensitiveProjectFiles {
+			p := filepath.Join(cwd, f)
+			if fileExists(p) {
+				if emptyFile == "" {
+					emptyFile = filepath.Join(os.TempDir(), "greywall", "empty")
+					_ = os.MkdirAll(filepath.Dir(emptyFile), 0o750)
+					_ = os.WriteFile(emptyFile, nil, 0o444)
+				}
+				args = append(args, "--ro-bind", emptyFile, p)
+				if debug {
+					fmt.Fprintf(os.Stderr, "[greywall:linux] Masking sensitive file: %s\n", p)
+				}
+			}
+		}
+	}
+
+	return args
+}
+
+// isSystemMountPoint returns true if the path is a top-level system directory
+// that gets mounted directly under --tmpfs / (bwrap auto-creates these).
+func isSystemMountPoint(path string) bool {
+	switch path {
+	case "/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/run", "/sys",
+		"/dev", "/proc", "/tmp",
+		// macOS
+		"/System", "/Library", "/Applications", "/private",
+		// Package managers
+		"/nix", "/snap", "/usr/local", "/opt/homebrew":
+		return true
+	}
+	return false
 }
 
 // WrapCommandLinux wraps a command with Linux bubblewrap sandbox.
@@ -480,52 +673,18 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge
 
 	}
 
-	defaultDenyRead := cfg != nil && cfg.Filesystem.DefaultDenyRead
+	defaultDenyRead := cfg != nil && cfg.Filesystem.IsDefaultDenyRead()
 
 	if opts.Learning {
 		// Skip defaultDenyRead logic in learning mode (already set up above)
 	} else if defaultDenyRead {
-		// In defaultDenyRead mode, we only bind essential system paths read-only
-		// and user-specified allowRead paths. Everything else is inaccessible.
+		// Deny-by-default mode: start with empty root, then whitelist system paths + CWD
 		if opts.Debug {
-			fmt.Fprintf(os.Stderr, "[greywall:linux] DefaultDenyRead mode enabled - binding only essential system paths\n")
+			fmt.Fprintf(os.Stderr, "[greywall:linux] DefaultDenyRead mode enabled - tmpfs root with selective mounts\n")
 		}
-
-		// Bind essential system paths read-only
-		// Skip /dev, /proc, /tmp as they're mounted with special options below
-		for _, systemPath := range GetDefaultReadablePaths() {
-			if systemPath == "/dev" || systemPath == "/proc" || systemPath == "/tmp" ||
-				systemPath == "/private/tmp" {
-				continue
-			}
-			if fileExists(systemPath) {
-				bwrapArgs = append(bwrapArgs, "--ro-bind", systemPath, systemPath)
-			}
-		}
-
-		// Bind user-specified allowRead paths
-		if cfg != nil && cfg.Filesystem.AllowRead != nil {
-			boundPaths := make(map[string]bool)
-
-			expandedPaths := ExpandGlobPatterns(cfg.Filesystem.AllowRead)
-			for _, p := range expandedPaths {
-				if fileExists(p) && !strings.HasPrefix(p, "/dev/") && !strings.HasPrefix(p, "/proc/") && !boundPaths[p] {
-					boundPaths[p] = true
-					bwrapArgs = append(bwrapArgs, "--ro-bind", p, p)
-				}
-			}
-			// Add non-glob paths
-			for _, p := range cfg.Filesystem.AllowRead {
-				normalized := NormalizePath(p)
-				if !ContainsGlobChars(normalized) && fileExists(normalized) &&
-					!strings.HasPrefix(normalized, "/dev/") && !strings.HasPrefix(normalized, "/proc/") && !boundPaths[normalized] {
-					boundPaths[normalized] = true
-					bwrapArgs = append(bwrapArgs, "--ro-bind", normalized, normalized)
-				}
-			}
-		}
+		bwrapArgs = append(bwrapArgs, buildDenyByDefaultMounts(cfg, cwd, opts.Debug)...)
 	} else {
-		// Default mode: bind entire root filesystem read-only
+		// Legacy mode: bind entire root filesystem read-only
 		bwrapArgs = append(bwrapArgs, "--ro-bind", "/", "/")
 	}
 
@@ -679,10 +838,20 @@ func WrapCommandLinuxWithOptions(cfg *config.Config, command string, proxyBridge
 		// subdirectory dangerous files without full tree walks that hang on large dirs.
 		mandatoryDeny := getMandatoryDenyPaths(cwd)
 
+		// In deny-by-default mode, sensitive project files are already masked
+		// with --ro-bind /dev/null by buildDenyByDefaultMounts(). Skip them here
+		// to avoid overriding the /dev/null mask with a real ro-bind.
+		maskedPaths := make(map[string]bool)
+		if defaultDenyRead {
+			for _, f := range SensitiveProjectFiles {
+				maskedPaths[filepath.Join(cwd, f)] = true
+			}
+		}
+
 		// Deduplicate
 		seen := make(map[string]bool)
 		for _, p := range mandatoryDeny {
-			if !seen[p] && fileExists(p) {
+			if !seen[p] && fileExists(p) && !maskedPaths[p] {
 				seen[p] = true
 				bwrapArgs = append(bwrapArgs, "--ro-bind", p, p)
 			}

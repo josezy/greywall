@@ -410,7 +410,7 @@ func TestMerge(t *testing.T) {
 	t.Run("merge defaultDenyRead and allowRead", func(t *testing.T) {
 		base := &Config{
 			Filesystem: FilesystemConfig{
-				DefaultDenyRead: true,
+				DefaultDenyRead: boolPtr(true),
 				AllowRead:       []string{"/home/user/project"},
 			},
 		}
@@ -421,11 +421,38 @@ func TestMerge(t *testing.T) {
 		}
 		result := Merge(base, override)
 
-		if !result.Filesystem.DefaultDenyRead {
-			t.Error("expected DefaultDenyRead to be true (from base)")
+		if !result.Filesystem.IsDefaultDenyRead() {
+			t.Error("expected IsDefaultDenyRead() to be true (from base)")
 		}
 		if len(result.Filesystem.AllowRead) != 2 {
 			t.Errorf("expected 2 allowRead paths, got %d: %v", len(result.Filesystem.AllowRead), result.Filesystem.AllowRead)
+		}
+	})
+
+	t.Run("defaultDenyRead nil defaults to true", func(t *testing.T) {
+		base := &Config{
+			Filesystem: FilesystemConfig{},
+		}
+		result := Merge(base, nil)
+		if !result.Filesystem.IsDefaultDenyRead() {
+			t.Error("expected IsDefaultDenyRead() to be true when nil (deny-by-default)")
+		}
+	})
+
+	t.Run("defaultDenyRead explicit false overrides", func(t *testing.T) {
+		base := &Config{
+			Filesystem: FilesystemConfig{
+				DefaultDenyRead: boolPtr(true),
+			},
+		}
+		override := &Config{
+			Filesystem: FilesystemConfig{
+				DefaultDenyRead: boolPtr(false),
+			},
+		}
+		result := Merge(base, override)
+		if result.Filesystem.IsDefaultDenyRead() {
+			t.Error("expected IsDefaultDenyRead() to be false (override explicit false)")
 		}
 	})
 }

@@ -36,12 +36,18 @@ type NetworkConfig struct {
 
 // FilesystemConfig defines filesystem restrictions.
 type FilesystemConfig struct {
-	DefaultDenyRead bool     `json:"defaultDenyRead,omitempty"` // If true, deny reads by default except system paths and AllowRead
+	DefaultDenyRead *bool    `json:"defaultDenyRead,omitempty"` // If nil or true, deny reads by default except system paths, CWD, and AllowRead
 	AllowRead       []string `json:"allowRead"`                 // Paths to allow reading (used when DefaultDenyRead is true)
 	DenyRead        []string `json:"denyRead"`
 	AllowWrite      []string `json:"allowWrite"`
 	DenyWrite       []string `json:"denyWrite"`
 	AllowGitConfig  bool     `json:"allowGitConfig,omitempty"`
+}
+
+// IsDefaultDenyRead returns whether deny-by-default read mode is enabled.
+// Defaults to true when not explicitly set (nil).
+func (f *FilesystemConfig) IsDefaultDenyRead() bool {
+	return f.DefaultDenyRead == nil || *f.DefaultDenyRead
 }
 
 // CommandConfig defines command restrictions.
@@ -417,8 +423,8 @@ func Merge(base, override *Config) *Config {
 		},
 
 		Filesystem: FilesystemConfig{
-			// Boolean fields: true if either enables it
-			DefaultDenyRead: base.Filesystem.DefaultDenyRead || override.Filesystem.DefaultDenyRead,
+			// Pointer field: override wins if set, otherwise base (nil = deny-by-default)
+			DefaultDenyRead: mergeOptionalBool(base.Filesystem.DefaultDenyRead, override.Filesystem.DefaultDenyRead),
 
 			// Append slices
 			AllowRead:  mergeStrings(base.Filesystem.AllowRead, override.Filesystem.AllowRead),

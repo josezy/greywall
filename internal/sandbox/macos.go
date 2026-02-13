@@ -37,6 +37,7 @@ type MacOSSandboxParams struct {
 	AllowLocalBinding       bool
 	AllowLocalOutbound      bool
 	DefaultDenyRead         bool
+	Cwd                     string // Current working directory (for deny-by-default CWD allowlisting)
 	ReadAllowPaths          []string
 	ReadDenyPaths           []string
 	WriteAllowPaths         []string
@@ -146,13 +147,13 @@ func getTmpdirParent() []string {
 }
 
 // generateReadRules generates filesystem read rules for the sandbox profile.
-func generateReadRules(defaultDenyRead bool, allowPaths, denyPaths []string, logTag string) []string {
+func generateReadRules(defaultDenyRead bool, cwd string, allowPaths, denyPaths []string, logTag string) []string {
 	var rules []string
 
 	if defaultDenyRead {
 		// When defaultDenyRead is enabled:
 		// 1. Allow file-read-metadata globally (needed for directory traversal, stat, etc.)
-		// 2. Allow file-read-data only for system paths + user-specified allowRead paths
+		// 2. Allow file-read-data only for system paths + CWD + user-specified allowRead paths
 		// This lets programs see what files exist but not read their contents.
 
 		// Allow metadata operations globally (stat, readdir, etc.) and root dir (for path resolution)
@@ -165,6 +166,44 @@ func generateReadRules(defaultDenyRead bool, allowPaths, denyPaths []string, log
 				"(allow file-read-data",
 				fmt.Sprintf("  (subpath %s))", escapePath(systemPath)),
 			)
+		}
+
+		// Allow reading CWD (full recursive read access)
+		if cwd != "" {
+			rules = append(rules,
+				"(allow file-read-data",
+				fmt.Sprintf("  (subpath %s))", escapePath(cwd)),
+			)
+
+			// Allow ancestor directory traversal (literal only, so programs can resolve CWD path)
+			for _, ancestor := range getAncestorDirectories(cwd) {
+				rules = append(rules,
+					fmt.Sprintf("(allow file-read-data (literal %s))", escapePath(ancestor)),
+				)
+			}
+		}
+
+		// Allow home shell configs and tool caches (read-only)
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			// Shell config files (literal access)
+			shellConfigs := []string{".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".inputrc"}
+			for _, f := range shellConfigs {
+				p := filepath.Join(home, f)
+				rules = append(rules,
+					fmt.Sprintf("(allow file-read-data (literal %s))", escapePath(p)),
+				)
+			}
+
+			// Home tool caches (subpath access for package managers/configs)
+			homeCaches := []string{".cache", ".npm", ".cargo", ".rustup", ".local", ".config", ".nvm", ".pyenv", ".rbenv", ".asdf"}
+			for _, d := range homeCaches {
+				p := filepath.Join(home, d)
+				rules = append(rules,
+					"(allow file-read-data",
+					fmt.Sprintf("  (subpath %s))", escapePath(p)),
+				)
+			}
 		}
 
 		// Allow reading data from user-specified paths
@@ -183,6 +222,24 @@ func generateReadRules(defaultDenyRead bool, allowPaths, denyPaths []string, log
 					fmt.Sprintf("  (subpath %s))", escapePath(normalized)),
 				)
 			}
+		}
+
+		// Deny sensitive files within CWD (Seatbelt evaluates deny before allow)
+		if cwd != "" {
+			for _, f := range SensitiveProjectFiles {
+				p := filepath.Join(cwd, f)
+				rules = append(rules,
+					"(deny file-read*",
+					fmt.Sprintf("  (literal %s)", escapePath(p)),
+					fmt.Sprintf("  (with message %q))", logTag),
+				)
+			}
+			// Also deny .env.* pattern via regex
+			rules = append(rules,
+				"(deny file-read*",
+				fmt.Sprintf("  (regex %s)", escapePath("^"+regexp.QuoteMeta(cwd)+"/\\.env\\..*$")),
+				fmt.Sprintf("  (with message %q))", logTag),
+			)
 		}
 	} else {
 		// Allow all reads by default
@@ -220,8 +277,18 @@ func generateReadRules(defaultDenyRead bool, allowPaths, denyPaths []string, log
 }
 
 // generateWriteRules generates filesystem write rules for the sandbox profile.
-func generateWriteRules(allowPaths, denyPaths []string, allowGitConfig bool, logTag string) []string {
+// When cwd is non-empty, it is automatically included in the write allow paths.
+func generateWriteRules(cwd string, allowPaths, denyPaths []string, allowGitConfig bool, logTag string) []string {
 	var rules []string
+
+	// Auto-allow CWD for writes (project directory should be writable)
+	if cwd != "" {
+		rules = append(rules,
+			"(allow file-write*",
+			fmt.Sprintf("  (subpath %s)", escapePath(cwd)),
+			fmt.Sprintf("  (with message %q))", logTag),
+		)
+	}
 
 	// Allow TMPDIR parent on macOS
 	for _, tmpdirParent := range getTmpdirParent() {
@@ -254,8 +321,11 @@ func generateWriteRules(allowPaths, denyPaths []string, allowGitConfig bool, log
 	}
 
 	// Combine user-specified and mandatory deny patterns
-	cwd, _ := os.Getwd()
-	mandatoryDeny := GetMandatoryDenyPatterns(cwd, allowGitConfig)
+	mandatoryCwd := cwd
+	if mandatoryCwd == "" {
+		mandatoryCwd, _ = os.Getwd()
+	}
+	mandatoryDeny := GetMandatoryDenyPatterns(mandatoryCwd, allowGitConfig)
 	allDenyPaths := make([]string, 0, len(denyPaths)+len(mandatoryDeny))
 	allDenyPaths = append(allDenyPaths, denyPaths...)
 	allDenyPaths = append(allDenyPaths, mandatoryDeny...)
@@ -530,14 +600,14 @@ func GenerateSandboxProfile(params MacOSSandboxParams) string {
 
 	// Read rules
 	profile.WriteString("; File read\n")
-	for _, rule := range generateReadRules(params.DefaultDenyRead, params.ReadAllowPaths, params.ReadDenyPaths, logTag) {
+	for _, rule := range generateReadRules(params.DefaultDenyRead, params.Cwd, params.ReadAllowPaths, params.ReadDenyPaths, logTag) {
 		profile.WriteString(rule + "\n")
 	}
 	profile.WriteString("\n")
 
 	// Write rules
 	profile.WriteString("; File write\n")
-	for _, rule := range generateWriteRules(params.WriteAllowPaths, params.WriteDenyPaths, params.AllowGitConfig, logTag) {
+	for _, rule := range generateWriteRules(params.Cwd, params.WriteAllowPaths, params.WriteDenyPaths, params.AllowGitConfig, logTag) {
 		profile.WriteString(rule + "\n")
 	}
 
@@ -562,6 +632,8 @@ func GenerateSandboxProfile(params MacOSSandboxParams) string {
 
 // WrapCommandMacOS wraps a command with macOS sandbox restrictions.
 func WrapCommandMacOS(cfg *config.Config, command string, exposedPorts []int, debug bool) (string, error) {
+	cwd, _ := os.Getwd()
+
 	// Build allow paths: default + configured
 	allowPaths := append(GetDefaultWritePaths(), cfg.Filesystem.AllowWrite...)
 
@@ -599,7 +671,8 @@ func WrapCommandMacOS(cfg *config.Config, command string, exposedPorts []int, de
 		AllowAllUnixSockets:     cfg.Network.AllowAllUnixSockets,
 		AllowLocalBinding:       allowLocalBinding,
 		AllowLocalOutbound:      allowLocalOutbound,
-		DefaultDenyRead:         cfg.Filesystem.DefaultDenyRead,
+		DefaultDenyRead:         cfg.Filesystem.IsDefaultDenyRead(),
+		Cwd:                     cwd,
 		ReadAllowPaths:          cfg.Filesystem.AllowRead,
 		ReadDenyPaths:           cfg.Filesystem.DenyRead,
 		WriteAllowPaths:         allowPaths,

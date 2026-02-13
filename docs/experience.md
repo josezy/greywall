@@ -93,3 +93,29 @@ echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/9
 ```
 
 **Alternative:** Accept the limitation — greywall still works for filesystem sandboxing, seccomp, and Landlock. Network access is blocked outright rather than redirected through a proxy.
+
+---
+
+## Linux: symlinked system dirs invisible after `--tmpfs /`
+
+**Problem:** On merged-usr distros (Arch, Fedora, modern Ubuntu), `/bin`, `/sbin`, `/lib`, `/lib64` are symlinks (e.g., `/bin -> usr/bin`). When switching from `--ro-bind / /` to `--tmpfs /` for deny-by-default isolation, these symlinks don't exist in the empty root. The `canMountOver()` helper explicitly rejects symlinks, so `--ro-bind /bin /bin` was silently skipped. Result: `execvp /usr/bin/bash: No such file or directory` — bash exists at `/usr/bin/bash` but the dynamic linker at `/lib64/ld-linux-x86-64.so.2` can't be found because `/lib64` is missing.
+
+**Diagnosis:** The error message is misleading. `execvp` reports "No such file or directory" both when the binary is missing and when the ELF interpreter (dynamic linker) is missing. The actual binary `/usr/bin/bash` existed via the `/usr` bind-mount, but the symlink `/lib64 -> usr/lib` was gone.
+
+**Fix:** Check each system path with `isSymlink()` before mounting. Symlinks get `--symlink <target> <path>` (bwrap recreates the symlink inside the sandbox); real directories get `--ro-bind`. On Arch: `--symlink usr/bin /bin`, `--symlink usr/bin /sbin`, `--symlink usr/lib /lib`, `--symlink usr/lib /lib64`.
+
+---
+
+## Linux: Landlock denies reads on bind-mounted /dev/null
+
+**Problem:** To mask `.env` files inside CWD, the initial approach used `--ro-bind /dev/null <cwd>/.env`. Inside the sandbox, `.env` appeared as a character device (bind mounts preserve file type). Landlock's `LANDLOCK_ACCESS_FS_READ_FILE` right only covers regular files, not character devices. Result: `cat .env` returned "Permission denied" instead of empty content.
+
+**Fix:** Use an empty regular file (`/tmp/greywall/empty`, 0 bytes, mode 0444) as the mask source instead of `/dev/null`. Landlock sees a regular file and allows the read. The file is created once in a fixed location under the greywall temp dir.
+
+---
+
+## Linux: mandatory deny paths override sensitive file masks
+
+**Problem:** In deny-by-default mode, `buildDenyByDefaultMounts()` correctly masked `.env` with `--ro-bind /tmp/greywall/empty <cwd>/.env`. But later in `WrapCommandLinuxWithOptions()`, the mandatory deny paths section called `getMandatoryDenyPaths()` which included `.env` files (added for write protection). It then applied `--ro-bind <cwd>/.env <cwd>/.env`, binding the real file over the empty mask. bwrap applies mounts in order, so the later ro-bind undid the masking.
+
+**Fix:** Track paths already masked by `buildDenyByDefaultMounts()` in a set. Skip those paths in the mandatory deny section to preserve the empty-file overlay.

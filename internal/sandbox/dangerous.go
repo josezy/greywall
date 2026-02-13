@@ -28,6 +28,30 @@ var DangerousDirectories = []string{
 	".claude/agents",
 }
 
+// SensitiveProjectFiles lists files within the project directory that should be
+// denied for both read and write access. These commonly contain secrets.
+var SensitiveProjectFiles = []string{
+	".env",
+	".env.local",
+	".env.development",
+	".env.production",
+	".env.staging",
+	".env.test",
+}
+
+// GetSensitiveProjectPaths returns concrete paths for sensitive files within the
+// given directory. Only returns paths for files that actually exist.
+func GetSensitiveProjectPaths(cwd string) []string {
+	var paths []string
+	for _, f := range SensitiveProjectFiles {
+		p := filepath.Join(cwd, f)
+		if _, err := os.Stat(p); err == nil {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 // GetDefaultWritePaths returns system paths that should be writable for commands to work.
 func GetDefaultWritePaths() []string {
 	home, _ := os.UserHomeDir()

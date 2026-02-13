@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -108,7 +109,8 @@ func buildMacOSParamsForTest(cfg *config.Config) MacOSSandboxParams {
 		AllowAllUnixSockets:     cfg.Network.AllowAllUnixSockets,
 		AllowLocalBinding:       allowLocalBinding,
 		AllowLocalOutbound:      allowLocalOutbound,
-		DefaultDenyRead:         cfg.Filesystem.DefaultDenyRead,
+		DefaultDenyRead:         cfg.Filesystem.IsDefaultDenyRead(),
+		Cwd:                     "/tmp/test-project",
 		ReadAllowPaths:          cfg.Filesystem.AllowRead,
 		ReadDenyPaths:           cfg.Filesystem.DenyRead,
 		WriteAllowPaths:         allowPaths,
@@ -175,38 +177,46 @@ func TestMacOS_DefaultDenyRead(t *testing.T) {
 	tests := []struct {
 		name                      string
 		defaultDenyRead           bool
+		cwd                       string
 		allowRead                 []string
 		wantContainsBlanketAllow  bool
 		wantContainsMetadataAllow bool
 		wantContainsSystemAllows  bool
 		wantContainsUserAllowRead bool
+		wantContainsCwdAllow      bool
 	}{
 		{
-			name:                      "default mode - blanket allow read",
+			name:                      "legacy mode - blanket allow read",
 			defaultDenyRead:           false,
+			cwd:                       "/home/user/project",
 			allowRead:                 nil,
 			wantContainsBlanketAllow:  true,
 			wantContainsMetadataAllow: false,
 			wantContainsSystemAllows:  false,
 			wantContainsUserAllowRead: false,
+			wantContainsCwdAllow:      false,
 		},
 		{
-			name:                      "defaultDenyRead enabled - metadata allow, system data allows",
+			name:                      "defaultDenyRead enabled - metadata allow, system data allows, CWD allow",
 			defaultDenyRead:           true,
+			cwd:                       "/home/user/project",
 			allowRead:                 nil,
 			wantContainsBlanketAllow:  false,
 			wantContainsMetadataAllow: true,
 			wantContainsSystemAllows:  true,
 			wantContainsUserAllowRead: false,
+			wantContainsCwdAllow:      true,
 		},
 		{
 			name:                      "defaultDenyRead with allowRead paths",
 			defaultDenyRead:           true,
-			allowRead:                 []string{"/home/user/project"},
+			cwd:                       "/home/user/project",
+			allowRead:                 []string{"/home/user/other"},
 			wantContainsBlanketAllow:  false,
 			wantContainsMetadataAllow: true,
 			wantContainsSystemAllows:  true,
 			wantContainsUserAllowRead: true,
+			wantContainsCwdAllow:      true,
 		},
 	}
 
@@ -215,6 +225,7 @@ func TestMacOS_DefaultDenyRead(t *testing.T) {
 			params := MacOSSandboxParams{
 				Command:         "echo test",
 				DefaultDenyRead: tt.defaultDenyRead,
+				Cwd:             tt.cwd,
 				ReadAllowPaths:  tt.allowRead,
 			}
 
@@ -234,6 +245,13 @@ func TestMacOS_DefaultDenyRead(t *testing.T) {
 				strings.Contains(profile, `(subpath "/bin")`)
 			if hasSystemAllows != tt.wantContainsSystemAllows {
 				t.Errorf("system path allows = %v, want %v\nProfile:\n%s", hasSystemAllows, tt.wantContainsSystemAllows, profile)
+			}
+
+			if tt.wantContainsCwdAllow && tt.cwd != "" {
+				hasCwdAllow := strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, tt.cwd))
+				if !hasCwdAllow {
+					t.Errorf("CWD path %q not found in profile", tt.cwd)
+				}
 			}
 
 			if tt.wantContainsUserAllowRead && len(tt.allowRead) > 0 {

@@ -81,17 +81,55 @@ func ApplyLandlockFromConfig(cfg *config.Config, cwd string, socketPaths []strin
 		}
 	}
 
-	// Current working directory - read access (may be upgraded to write below)
+	// Current working directory - read+write access (project directory)
 	if cwd != "" {
-		if err := ruleset.AllowRead(cwd); err != nil && debug {
-			fmt.Fprintf(os.Stderr, "[greywall:landlock] Warning: failed to add cwd read path: %v\n", err)
+		if err := ruleset.AllowReadWrite(cwd); err != nil && debug {
+			fmt.Fprintf(os.Stderr, "[greywall:landlock] Warning: failed to add cwd read/write path: %v\n", err)
 		}
 	}
 
-	// Home directory - read access
-	if home, err := os.UserHomeDir(); err == nil {
-		if err := ruleset.AllowRead(home); err != nil && debug {
-			fmt.Fprintf(os.Stderr, "[greywall:landlock] Warning: failed to add home read path: %v\n", err)
+	// Home directory - read access only when not in deny-by-default mode.
+	// In deny-by-default mode, only specific user tooling paths are allowed,
+	// not the entire home directory. Landlock can't selectively deny files
+	// within an allowed directory, so we rely on bwrap mount overlays for
+	// .env file masking.
+	defaultDenyRead := cfg != nil && cfg.Filesystem.IsDefaultDenyRead()
+	if !defaultDenyRead {
+		if home, err := os.UserHomeDir(); err == nil {
+			if err := ruleset.AllowRead(home); err != nil && debug {
+				fmt.Fprintf(os.Stderr, "[greywall:landlock] Warning: failed to add home read path: %v\n", err)
+			}
+		}
+	} else {
+		// In deny-by-default mode, allow specific user tooling paths
+		if home, err := os.UserHomeDir(); err == nil {
+			for _, p := range GetDefaultReadablePaths() {
+				if strings.HasPrefix(p, home) {
+					if err := ruleset.AllowRead(p); err != nil && debug {
+						fmt.Fprintf(os.Stderr, "[greywall:landlock] Warning: failed to add user tooling path %s: %v\n", p, err)
+					}
+				}
+			}
+			// Shell configs
+			shellConfigs := []string{".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".inputrc"}
+			for _, f := range shellConfigs {
+				p := filepath.Join(home, f)
+				if err := ruleset.AllowRead(p); err != nil && debug {
+					if !os.IsNotExist(err) {
+						fmt.Fprintf(os.Stderr, "[greywall:landlock] Warning: failed to add shell config %s: %v\n", p, err)
+					}
+				}
+			}
+			// Home caches
+			homeCaches := []string{".cache", ".npm", ".cargo", ".rustup", ".local", ".config"}
+			for _, d := range homeCaches {
+				p := filepath.Join(home, d)
+				if err := ruleset.AllowRead(p); err != nil && debug {
+					if !os.IsNotExist(err) {
+						fmt.Fprintf(os.Stderr, "[greywall:landlock] Warning: failed to add home cache %s: %v\n", p, err)
+					}
+				}
+			}
 		}
 	}
 

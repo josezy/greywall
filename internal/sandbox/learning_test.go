@@ -75,9 +75,10 @@ func TestCollapsePaths(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	tests := []struct {
-		name     string
-		paths    []string
-		contains []string // paths that should be in the result
+		name        string
+		paths       []string
+		contains    []string // paths that should be in the result
+		notContains []string // paths that must NOT be in the result
 	}{
 		{
 			name: "multiple paths under same app dir",
@@ -111,6 +112,33 @@ func TestCollapsePaths(t *testing.T) {
 				"/home/testuser/.config/opencode",
 			},
 		},
+		{
+			name: "files directly under home stay as exact paths",
+			paths: []string{
+				"/home/testuser/.gitignore",
+				"/home/testuser/.npmrc",
+			},
+			contains: []string{
+				"/home/testuser/.gitignore",
+				"/home/testuser/.npmrc",
+			},
+			notContains: []string{"/home/testuser"},
+		},
+		{
+			name: "mix of home files and app dir paths",
+			paths: []string{
+				"/home/testuser/.gitignore",
+				"/home/testuser/.cache/opencode/db/main.sqlite",
+				"/home/testuser/.cache/opencode/version",
+				"/home/testuser/.npmrc",
+			},
+			contains: []string{
+				"/home/testuser/.gitignore",
+				"/home/testuser/.npmrc",
+				"/home/testuser/.cache/opencode",
+			},
+			notContains: []string{"/home/testuser"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -132,6 +160,13 @@ func TestCollapsePaths(t *testing.T) {
 				}
 				if !found {
 					t.Errorf("CollapsePaths() = %v, missing expected path %q", got, want)
+				}
+			}
+			for _, bad := range tt.notContains {
+				for _, g := range got {
+					if g == bad {
+						t.Errorf("CollapsePaths() = %v, should NOT contain %q", got, bad)
+					}
 				}
 			}
 		})
@@ -325,8 +360,9 @@ func TestListLearnedTemplates(t *testing.T) {
 }
 
 func TestBuildTemplate(t *testing.T) {
+	allowRead := []string{"~/external-data"}
 	allowWrite := []string{".", "~/.cache/opencode", "~/.config/opencode"}
-	result := buildTemplate("opencode", allowWrite)
+	result := buildTemplate("opencode", allowRead, allowWrite)
 
 	// Check header comments
 	if !strings.Contains(result, `Learned template for "opencode"`) {
@@ -340,6 +376,12 @@ func TestBuildTemplate(t *testing.T) {
 	}
 
 	// Check content
+	if !strings.Contains(result, `"allowRead"`) {
+		t.Error("template missing allowRead field")
+	}
+	if !strings.Contains(result, `"~/external-data"`) {
+		t.Error("template missing expected allowRead path")
+	}
 	if !strings.Contains(result, `"allowWrite"`) {
 		t.Error("template missing allowWrite field")
 	}
@@ -351,6 +393,22 @@ func TestBuildTemplate(t *testing.T) {
 	}
 	if !strings.Contains(result, `"denyRead"`) {
 		t.Error("template missing denyRead field")
+	}
+	// Check .env patterns are included in denyRead
+	if !strings.Contains(result, `".env"`) {
+		t.Error("template missing .env in denyRead")
+	}
+	if !strings.Contains(result, `".env.*"`) {
+		t.Error("template missing .env.* in denyRead")
+	}
+}
+
+func TestBuildTemplateNoAllowRead(t *testing.T) {
+	result := buildTemplate("simple-cmd", nil, []string{"."})
+
+	// When allowRead is nil, it should be omitted from JSON
+	if strings.Contains(result, `"allowRead"`) {
+		t.Error("template should omit allowRead when nil")
 	}
 }
 

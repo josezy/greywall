@@ -87,6 +87,43 @@ func GenerateLearnedTemplate(straceLogPath, cmdName string, debug bool) (string,
 		allowWrite = append(allowWrite, toTildePath(p, home))
 	}
 
+	// Filter read paths: remove system defaults, CWD subtree, and sensitive paths
+	cwd, _ := os.Getwd()
+	var filteredReads []string
+	defaultReadable := GetDefaultReadablePaths()
+	for _, p := range result.ReadPaths {
+		// Skip system defaults
+		isDefault := false
+		for _, dp := range defaultReadable {
+			if p == dp || strings.HasPrefix(p, dp+"/") {
+				isDefault = true
+				break
+			}
+		}
+		if isDefault {
+			continue
+		}
+		// Skip CWD subtree (auto-included)
+		if cwd != "" && (p == cwd || strings.HasPrefix(p, cwd+"/")) {
+			continue
+		}
+		// Skip sensitive paths
+		if isSensitivePath(p, home) {
+			if debug {
+				fmt.Fprintf(os.Stderr, "[greywall] Skipping sensitive read path: %s\n", p)
+			}
+			continue
+		}
+		filteredReads = append(filteredReads, p)
+	}
+
+	// Collapse read paths and convert to tilde-relative
+	collapsedReads := CollapsePaths(filteredReads)
+	var allowRead []string
+	for _, p := range collapsedReads {
+		allowRead = append(allowRead, toTildePath(p, home))
+	}
+
 	// Convert read paths to tilde-relative for display
 	var readDisplay []string
 	for _, p := range result.ReadPaths {
@@ -99,6 +136,13 @@ func GenerateLearnedTemplate(straceLogPath, cmdName string, debug bool) (string,
 	if len(readDisplay) > 0 {
 		fmt.Fprintf(os.Stderr, "[greywall] Discovered read paths:\n")
 		for _, p := range readDisplay {
+			fmt.Fprintf(os.Stderr, "[greywall]   %s\n", p)
+		}
+	}
+
+	if len(allowRead) > 0 {
+		fmt.Fprintf(os.Stderr, "[greywall] Additional read paths (beyond system + CWD):\n")
+		for _, p := range allowRead {
 			fmt.Fprintf(os.Stderr, "[greywall]   %s\n", p)
 		}
 	}
@@ -118,7 +162,7 @@ func GenerateLearnedTemplate(straceLogPath, cmdName string, debug bool) (string,
 	fmt.Fprintf(os.Stderr, "\n")
 
 	// Build template
-	template := buildTemplate(cmdName, allowWrite)
+	template := buildTemplate(cmdName, allowRead, allowWrite)
 
 	// Save template
 	templatePath := LearnedTemplatePath(cmdName)
@@ -176,9 +220,15 @@ func CollapsePaths(paths []string) []string {
 		}
 	}
 
-	// For standalone paths, use their parent directory
+	// For standalone paths, use their parent directory — but never collapse to $HOME
 	for _, p := range standalone {
-		result = append(result, filepath.Dir(p))
+		parent := filepath.Dir(p)
+		if parent == home {
+			// Keep exact file path to avoid opening entire home directory
+			result = append(result, p)
+		} else {
+			result = append(result, parent)
+		}
 	}
 
 	// Sort and deduplicate (remove sub-paths of other paths)
@@ -345,9 +395,18 @@ func deduplicateSubPaths(paths []string) []string {
 	return result
 }
 
+// getSensitiveProjectDenyPatterns returns denyRead entries for sensitive project files.
+func getSensitiveProjectDenyPatterns() []string {
+	return []string{
+		".env",
+		".env.*",
+	}
+}
+
 // buildTemplate generates the JSONC template content for a learned config.
-func buildTemplate(cmdName string, allowWrite []string) string {
+func buildTemplate(cmdName string, allowRead, allowWrite []string) string {
 	type fsConfig struct {
+		AllowRead  []string `json:"allowRead,omitempty"`
 		AllowWrite []string `json:"allowWrite"`
 		DenyWrite  []string `json:"denyWrite"`
 		DenyRead   []string `json:"denyRead"`
@@ -356,11 +415,15 @@ func buildTemplate(cmdName string, allowWrite []string) string {
 		Filesystem fsConfig `json:"filesystem"`
 	}
 
+	// Combine sensitive read patterns with .env project patterns
+	denyRead := append(getSensitiveReadPatterns(), getSensitiveProjectDenyPatterns()...)
+
 	cfg := templateConfig{
 		Filesystem: fsConfig{
+			AllowRead:  allowRead,
 			AllowWrite: allowWrite,
 			DenyWrite:  getDangerousFilePatterns(),
-			DenyRead:   getSensitiveReadPatterns(),
+			DenyRead:   denyRead,
 		},
 	}
 

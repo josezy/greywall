@@ -123,13 +123,17 @@ func assertContains(t *testing.T, haystack, needle string) {
 // ============================================================================
 
 // testConfig creates a test configuration with sensible defaults.
+// Uses legacy mode (defaultDenyRead=false) for predictable testing of
+// existing integration tests. Use testConfigDenyByDefault() for tests
+// that specifically test deny-by-default behavior.
 func testConfig() *config.Config {
 	return &config.Config{
 		Network: config.NetworkConfig{},
 		Filesystem: config.FilesystemConfig{
-			DenyRead:   []string{},
-			AllowWrite: []string{},
-			DenyWrite:  []string{},
+			DefaultDenyRead: boolPtr(false), // Legacy mode for existing tests
+			DenyRead:        []string{},
+			AllowWrite:      []string{},
+			DenyWrite:       []string{},
 		},
 		Command: config.CommandConfig{
 			Deny:        []string{},
