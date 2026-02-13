@@ -1,5 +1,10 @@
 version: 2
 
+gitea_urls:
+  api: https://gitea.app.monadical.io/api/v1
+  download: https://gitea.app.monadical.io
+  skip_tls_verify: false
+
 before:
   hooks:
     - go mod tidy
@@ -42,7 +47,7 @@ checksum:
 
 changelog:
   sort: asc
-  use: github
+  use: gitea
   format: "{{ .SHA }}: {{ .Message }}{{ with .AuthorUsername }} (@{{ . }}){{ end }}"
   filters:
     exclude:
@@ -76,7 +81,7 @@ changelog:
       order: 9999
 
 release:
-  github:
+  gitea:
     owner: monadical
     name: greywall
   draft: false
