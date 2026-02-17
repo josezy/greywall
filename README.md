@@ -2,20 +2,20 @@
 
 **The sandboxing layer of the GreyHaven platform.**
 
-Greywall wraps commands in a sandbox that blocks network access by default and restricts filesystem operations. It is the core sandboxing component of the GreyHaven platform, providing defense-in-depth for running untrusted code.
+Greywall wraps commands in a sandbox that blocks network access by default and restricts filesystem operations. On Linux, it uses tun2socks for truly transparent proxying: all TCP/UDP traffic is captured at the kernel level via a TUN device and forwarded through an external SOCKS5 proxy. No application awareness needed.
 
 ```bash
-# Block all network access (default)
-greywall curl https://example.com  # → 403 Forbidden
+# Block all network access (default — no proxy running = no connectivity)
+greywall -- curl https://example.com
 
-# Allow specific domains
-greywall -t code npm install  # → uses 'code' template with npm/pypi/etc allowed
+# Route traffic through an external SOCKS5 proxy
+greywall --proxy socks5://localhost:1080 -- curl https://example.com
 
 # Block dangerous commands
 greywall -c "rm -rf /"  # → blocked by command deny rules
 ```
 
-Greywall also works as a permission manager for CLI agents. **Greywall works with popular coding agents like Claude Code, Codex, Gemini CLI, Cursor Agent, OpenCode, Factory (Droid) CLI, etc.** See [agents.md](./docs/agents.md) for more details.
+Greywall also works as a permission manager for CLI agents. See [agents.md](./docs/agents.md) for integration with Claude Code, Codex, Gemini CLI, OpenCode, and others.
 
 ## Install
 
@@ -39,83 +39,123 @@ go install gitea.app.monadical.io/monadical/greywall/cmd/greywall@latest
 ```bash
 git clone https://gitea.app.monadical.io/monadical/greywall
 cd greywall
-go build -o greywall ./cmd/greywall
+make setup && make build
 ```
 
 </details>
 
-**Additional requirements for Linux:**
+**Linux dependencies:**
 
-- `bubblewrap` (for sandboxing)
-- `socat` (for network bridging)
-- `bpftrace` (optional, for filesystem violation visibility when monitoring with `-m`)
+- `bubblewrap` — container-free sandboxing (required)
+- `socat` — network bridging (required)
+
+Check dependency status with `greywall --version`.
 
 ## Usage
 
-### Basic
+### Basic commands
 
 ```bash
-# Run command with all network blocked (no domains allowed by default)
-greywall curl https://example.com
+# Run with all network blocked (default)
+greywall -- curl https://example.com
 
 # Run with shell expansion
 greywall -c "echo hello && ls"
 
+# Route through a SOCKS5 proxy
+greywall --proxy socks5://localhost:1080 -- npm install
+
+# Expose a port for inbound connections (e.g., dev servers)
+greywall -p 3000 -c "npm run dev"
+
 # Enable debug logging
-greywall -d curl https://example.com
+greywall -d -- curl https://example.com
 
-# Use a template
-greywall -t code -- claude  # Runs Claude Code using `code` template config
+# Monitor sandbox violations
+greywall -m -- npm install
 
-# Monitor mode (shows violations)
-greywall -m npm install
+# Show available Linux security features
+greywall --linux-features
 
-# Show all commands and options
-greywall --help
+# Show version and dependency status
+greywall --version
+```
+
+### Learning mode
+
+Greywall can trace a command's filesystem access and generate a config template automatically:
+
+```bash
+# Run in learning mode — traces file access via strace
+greywall --learning -- opencode
+
+# List generated templates
+greywall templates list
+
+# Show a template's content
+greywall templates show opencode
+
+# Next run auto-loads the learned template
+greywall -- opencode
 ```
 
 ### Configuration
 
 Greywall reads from `~/.config/greywall/greywall.json` by default (or `~/Library/Application Support/greywall/greywall.json` on macOS).
 
-```json
+```jsonc
 {
-  "extends": "code",
-  "network": { "allowedDomains": ["private.company.com"] },
-  "filesystem": { "allowWrite": ["."] },
-  "command": { "deny": ["git push", "npm publish"] }
+  // Route traffic through an external SOCKS5 proxy
+  "network": {
+    "proxyUrl": "socks5://localhost:1080",
+    "dnsAddr": "localhost:5353"
+  },
+  // Control filesystem access
+  "filesystem": {
+    "defaultDenyRead": true,
+    "allowRead": ["~/.config/myapp"],
+    "allowWrite": ["."],
+    "denyWrite": ["~/.ssh/**"],
+    "denyRead": ["~/.ssh/id_*", ".env"]
+  },
+  // Block dangerous commands
+  "command": {
+    "deny": ["git push", "npm publish"]
+  }
 }
 ```
 
-Use `greywall --settings ./custom.json` to specify a different config.
+Use `greywall --settings ./custom.json` to specify a different config file.
 
-### Import from Claude Code
-
-```bash
-greywall import --claude --save
-```
+By default (when connected to GreyHaven), traffic routes through the GreyHaven SOCKS5 proxy at `localhost:42052` with DNS via `localhost:42053`.
 
 ## Features
 
-- **Network isolation** - All outbound blocked by default; allowlist domains via config
-- **Filesystem restrictions** - Control read/write access paths
-- **Command blocking** - Deny dangerous commands like `rm -rf /`, `git push`
-- **SSH Command Filtering** - Control which hosts and commands are allowed over SSH
-- **Built-in templates** - Pre-configured rulesets for common workflows
-- **Violation monitoring** - Real-time logging of blocked requests (`-m`)
-- **Cross-platform** - macOS (sandbox-exec) + Linux (bubblewrap)
+- **Transparent proxy** — All TCP/UDP traffic captured at the kernel level via tun2socks and routed through an external SOCKS5 proxy (Linux)
+- **Network isolation** — All outbound blocked by default; traffic only flows when a proxy is available
+- **Filesystem restrictions** — Deny-by-default read mode, controlled write paths, sensitive file protection
+- **Learning mode** — Trace filesystem access with strace and auto-generate config templates
+- **Command blocking** — Deny dangerous commands (`rm -rf /`, `git push`, `shutdown`, etc.)
+- **SSH filtering** — Control which hosts and commands are allowed over SSH
+- **Environment hardening** — Strips dangerous env vars (`LD_PRELOAD`, `DYLD_*`, etc.)
+- **Violation monitoring** — Real-time logging of sandbox violations (`-m`)
+- **Shell completions** — `greywall completion bash|zsh|fish|powershell`
+- **Cross-platform** — Linux (bubblewrap + seccomp + Landlock + eBPF) and macOS (sandbox-exec)
 
-Greywall can be used as a Go package or CLI tool.
+Greywall can also be used as a [Go package](docs/library.md).
 
 ## Documentation
 
-- [Index](/docs/README.md)
+- [Documentation Index](docs/README.md)
 - [Quickstart Guide](docs/quickstart.md)
+- [Why Greywall](docs/why-greywall.md)
 - [Configuration Reference](docs/configuration.md)
 - [Security Model](docs/security-model.md)
 - [Architecture](ARCHITECTURE.md)
+- [Linux Security Features](docs/linux-security-features.md)
+- [AI Agent Integration](docs/agents.md)
 - [Library Usage (Go)](docs/library.md)
-- [Examples](examples/)
+- [Troubleshooting](docs/troubleshooting.md)
 
 ## Attribution
 
