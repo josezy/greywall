@@ -1,6 +1,6 @@
 # Greywall
 
-Greywall wraps commands in a deny-by-default sandbox. Filesystem access is restricted to the current directory by default — use `--learning` to trace what else a command needs and auto-generate a config template. All network traffic is transparently redirected through [greyproxy](https://github.com/GreyhavenHQ/greyproxy), a deny-by-default transparent proxy with a live allow/deny dashboard. Run `greywall setup` to install greyproxy automatically.
+Greywall wraps commands in a deny-by-default sandbox. Filesystem access is restricted to the current directory by default. Use `--learning` to trace what else a command needs and auto-generate a config template. All network traffic is transparently redirected through [greyproxy](https://github.com/GreyhavenHQ/greyproxy), a deny-by-default transparent proxy with a live allow/deny dashboard. Run `greywall setup` to install greyproxy automatically.
 
 *Note: linux only at the moment, macos support is coming!*
 
@@ -46,8 +46,8 @@ make setup && make build
 
 **Linux dependencies:**
 
-- `bubblewrap` — container-free sandboxing (required)
-- `socat` — network bridging (required)
+- `bubblewrap` - container-free sandboxing (required)
+- `socat` - network bridging (required)
 
 Check dependency status with `greywall check`.
 
@@ -92,7 +92,7 @@ greywall setup
 Greywall can trace a command's filesystem access and generate a config template automatically:
 
 ```bash
-# Run in learning mode — traces file access via strace
+# Run in learning mode - traces file access via strace
 greywall --learning -- opencode
 
 # List generated templates
@@ -137,16 +137,16 @@ By default, traffic routes through the GreyProxy SOCKS5 proxy at `localhost:4305
 
 ## Features
 
-- **Transparent proxy** — All TCP/UDP traffic captured at the kernel level via tun2socks and routed through an external SOCKS5 proxy (Linux)
-- **Network isolation** — All outbound blocked by default; traffic only flows when a proxy is available
-- **Filesystem restrictions** — Deny-by-default read mode, controlled write paths, sensitive file protection
-- **Learning mode** — Trace filesystem access with strace and auto-generate config templates
-- **Command blocking** — Deny dangerous commands (`rm -rf /`, `git push`, `shutdown`, etc.)
-- **SSH filtering** — Control which hosts and commands are allowed over SSH
-- **Environment hardening** — Strips dangerous env vars (`LD_PRELOAD`, `DYLD_*`, etc.)
-- **Violation monitoring** — Real-time logging of sandbox violations (`-m`)
-- **Shell completions** — `greywall completion bash|zsh|fish|powershell`
-- **Cross-platform** — Linux (bubblewrap + seccomp + Landlock + eBPF) and macOS (sandbox-exec)
+- **Transparent proxy** - All TCP/UDP traffic captured at the kernel level via tun2socks and routed through an external SOCKS5 proxy (Linux)
+- **Network isolation** - All outbound blocked by default; traffic only flows when a proxy is available
+- **Filesystem restrictions** - Deny-by-default read mode, controlled write paths, sensitive file protection
+- **Learning mode** - Trace filesystem access with strace and auto-generate config templates
+- **Command blocking** - Deny dangerous commands (`rm -rf /`, `git push`, `shutdown`, etc.)
+- **SSH filtering** - Control which hosts and commands are allowed over SSH
+- **Environment hardening** - Strips dangerous env vars (`LD_PRELOAD`, `DYLD_*`, etc.)
+- **Violation monitoring** - Real-time logging of sandbox violations (`-m`)
+- **Shell completions** - `greywall completion bash|zsh|fish|powershell`
+- **Cross-platform** - Linux (bubblewrap + seccomp + Landlock + eBPF) and macOS (sandbox-exec)
 
 Greywall can also be used as a [Go package](docs/library.md).
 
