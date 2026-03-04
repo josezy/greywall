@@ -1,9 +1,0 @@
-{
-  "network": {
-    "allowLocalBinding": true,
-    "allowLocalOutbound": true
-  },
-  "filesystem": {
-    "allowWrite": [".", "/tmp"]
-  }
-}

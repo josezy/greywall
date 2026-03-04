@@ -26,10 +26,6 @@ Greywall is a sandboxing tool that restricts network and filesystem access for a
 - [Testing](testing.md) - How to run tests and write new ones
 - [Benchmarking](benchmarking.md) - Performance overhead and profiling
 
-## Examples
-
-See [`examples/`](../examples/README.md) for runnable demos.
-
 ## Quick Reference
 
 ### Common commands
