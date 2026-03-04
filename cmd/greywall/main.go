@@ -15,6 +15,7 @@ import (
 
 	"gitea.app.monadical.io/monadical/greywall/internal/config"
 	"gitea.app.monadical.io/monadical/greywall/internal/platform"
+	"gitea.app.monadical.io/monadical/greywall/internal/proxy"
 	"gitea.app.monadical.io/monadical/greywall/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -111,6 +112,8 @@ Configuration file format:
 
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
 	rootCmd.AddCommand(newTemplatesCmd())
+	rootCmd.AddCommand(newCheckCmd())
+	rootCmd.AddCommand(newSetupCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -121,11 +124,7 @@ Configuration file format:
 
 func runCommand(cmd *cobra.Command, args []string) error {
 	if showVersion {
-		fmt.Printf("greywall - lightweight, container-free sandbox for running untrusted commands\n")
-		fmt.Printf("  Version: %s\n", version)
-		fmt.Printf("  Built:   %s\n", buildTime)
-		fmt.Printf("  Commit:  %s\n", gitCommit)
-		sandbox.PrintDependencyStatus()
+		fmt.Printf("greywall %s\n", version)
 		return nil
 	}
 
@@ -410,6 +409,89 @@ func extractCommandName(args []string, cmdStr string) string {
 	}
 	// Strip path prefix
 	return filepath.Base(name)
+}
+
+// newCheckCmd creates the check subcommand for diagnostics.
+func newCheckCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "check",
+		Short: "Check greywall status, dependencies, and greyproxy connectivity",
+		Long: `Run diagnostics to check greywall readiness.
+
+Shows version information, platform dependencies, security features,
+and greyproxy installation/running status.`,
+		Args: cobra.NoArgs,
+		RunE: runCheck,
+	}
+}
+
+func runCheck(_ *cobra.Command, _ []string) error {
+	fmt.Printf("greywall - lightweight, container-free sandbox for running untrusted commands\n")
+	fmt.Printf("  Version: %s\n", version)
+	fmt.Printf("  Built:   %s\n", buildTime)
+	fmt.Printf("  Commit:  %s\n", gitCommit)
+
+	sandbox.PrintDependencyStatus()
+
+	fmt.Printf("\n  Greyproxy:\n")
+	status := proxy.Detect()
+	if status.Installed {
+		if status.Version != "" {
+			fmt.Printf("    ✓ installed (v%s) at %s\n", status.Version, status.Path)
+		} else {
+			fmt.Printf("    ✓ installed at %s\n", status.Path)
+		}
+		if status.Running {
+			fmt.Printf("    ✓ running (SOCKS5 :43052, DNS :43053, Dashboard :43080)\n")
+		} else {
+			fmt.Printf("    ✗ not running\n")
+			fmt.Printf("      Start with: greywall setup\n")
+		}
+	} else {
+		fmt.Printf("    ✗ not installed\n")
+		fmt.Printf("      Install with: greywall setup\n")
+	}
+
+	return nil
+}
+
+// newSetupCmd creates the setup subcommand for installing greyproxy.
+func newSetupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "setup",
+		Short: "Install and start greyproxy (network proxy for sandboxed commands)",
+		Long: `Downloads and installs greyproxy from GitHub releases.
+
+greyproxy provides SOCKS5 proxying and DNS resolution for sandboxed commands.
+The installer will:
+  1. Download the latest greyproxy release for your platform
+  2. Install the binary to ~/.local/bin/greyproxy
+  3. Register and start a systemd user service`,
+		Args: cobra.NoArgs,
+		RunE: runSetup,
+	}
+}
+
+func runSetup(_ *cobra.Command, _ []string) error {
+	status := proxy.Detect()
+
+	if status.Installed && status.Running {
+		fmt.Printf("greyproxy is already installed (v%s) and running.\n", status.Version)
+		fmt.Printf("Run 'greywall check' for full status.\n")
+		return nil
+	}
+
+	if status.Installed && !status.Running {
+		if err := proxy.Start(os.Stderr); err != nil {
+			return err
+		}
+		fmt.Printf("greyproxy started.\n")
+		return nil
+	}
+
+	return proxy.Install(proxy.InstallOptions{
+		Output: os.Stderr,
+	})
 }
 
 // newCompletionCmd creates the completion subcommand for shell completions.
