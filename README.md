@@ -1,21 +1,17 @@
 # Greywall
 
-**The sandboxing layer of the GreyHaven platform.**
-
-Greywall wraps commands in a sandbox that blocks network access by default and restricts filesystem operations. On Linux, it uses tun2socks for truly transparent proxying: all TCP/UDP traffic is captured at the kernel level via a TUN device and forwarded through an external SOCKS5 proxy. No application awareness needed.
+Greywall wraps commands in a deny-by-default sandbox. Filesystem access is restricted to the current directory by default — use `--learning` to trace what else a command needs and auto-generate a config template. All network traffic is transparently redirected through [greyproxy](https://github.com/GreyhavenHQ/greyproxy), a deny-by-default transparent proxy with a live allow/deny dashboard. Run `greywall setup` to install greyproxy automatically.
 
 ```bash
-# Block all network access (default — no proxy running = no connectivity)
+# Sandbox a command (network + filesystem denied by default)
 greywall -- curl https://example.com
 
-# Route traffic through an external SOCKS5 proxy
-greywall --proxy socks5://localhost:1080 -- curl https://example.com
+# Learn what filesystem access a command needs, then auto-generate a template
+greywall --learning -- opencode
 
 # Block dangerous commands
 greywall -c "rm -rf /"  # → blocked by command deny rules
 ```
-
-Greywall also works as a permission manager for CLI agents. See [agents.md](./docs/agents.md) for integration with Claude Code, Codex, Gemini CLI, OpenCode, and others.
 
 ## Install
 
@@ -49,7 +45,7 @@ make setup && make build
 - `bubblewrap` — container-free sandboxing (required)
 - `socat` — network bridging (required)
 
-Check dependency status with `greywall --version`.
+Check dependency status with `greywall check`.
 
 ## Usage
 
@@ -77,8 +73,14 @@ greywall -m -- npm install
 # Show available Linux security features
 greywall --linux-features
 
-# Show version and dependency status
+# Show version
 greywall --version
+
+# Check dependencies, security features, and greyproxy status
+greywall check
+
+# Install and start greyproxy
+greywall setup
 ```
 
 ### Learning mode
@@ -150,6 +152,7 @@ Greywall can also be used as a [Go package](docs/library.md).
 - [Quickstart Guide](docs/quickstart.md)
 - [Why Greywall](docs/why-greywall.md)
 - [Configuration Reference](docs/configuration.md)
+- [Learning Mode](docs/learning.md)
 - [Security Model](docs/security-model.md)
 - [Architecture](ARCHITECTURE.md)
 - [Linux Security Features](docs/linux-security-features.md)
