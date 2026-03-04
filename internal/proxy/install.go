@@ -248,10 +248,17 @@ func extractTarGz(archivePath string) (string, error) {
 }
 
 // runGreyproxyInstall shells out to the extracted greyproxy binary with "install" arg.
-// Stdin/stdout/stderr are passed through so the interactive [y/N] prompt works.
+// Stdin is connected to /dev/tty so interactive prompts work when piped via curl | sh.
 func runGreyproxyInstall(binaryPath string) error {
 	cmd := exec.Command(binaryPath, "install") //nolint:gosec // binaryPath is from our extracted archive
-	cmd.Stdin = os.Stdin
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		// Fallback to stdin if /dev/tty is unavailable (e.g., non-interactive CI)
+		cmd.Stdin = os.Stdin
+	} else {
+		cmd.Stdin = tty
+		defer func() { _ = tty.Close() }()
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
