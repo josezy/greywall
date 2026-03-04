@@ -29,13 +29,15 @@ These are separate on purpose. A typical safe default for dev servers is:
 
 ## Filesystem model
 
-Greywall is designed around "read mostly, write narrowly":
+Greywall uses a deny-by-default model for both reads and writes:
 
-- **Reads**: allowed by default (you can block specific paths via `denyRead`).
+- **Reads**: denied by default (`defaultDenyRead` is `true` when not set). Only system paths, the current working directory, and paths listed in `allowRead` are accessible. You can use `denyRead` to block specific paths even within allowed areas.
 - **Writes**: denied by default (you must opt-in with `allowWrite`).
 - **denyWrite**: overrides `allowWrite` (useful for protecting secrets and dangerous files).
 
-Greywall also protects some dangerous targets regardless of config (e.g. shell startup files and git hooks). See `ARCHITECTURE.md` for the full list.
+Use `--learning` mode to automatically discover the read/write paths a command needs and generate a config template. See [Learning Mode](learning.md) for details.
+
+Greywall also protects some dangerous targets regardless of config (e.g. shell startup files, git hooks, `.env` files). See `ARCHITECTURE.md` for the full list.
 
 ## Debug vs Monitor mode
 

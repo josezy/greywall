@@ -43,30 +43,47 @@ If some features aren't available (like network namespaces in Docker/CI), greywa
 
 Run `greywall --linux-features` to see what's available in your environment.
 
+### Install GreyProxy (optional)
+
+GreyProxy provides SOCKS5 proxying and DNS resolution for sandboxed commands. Without it, all network access is blocked.
+
+```bash
+# Install and start greyproxy
+greywall setup
+```
+
+This downloads the latest greyproxy release, installs it to `~/.local/bin/greyproxy`, and starts a systemd user service.
+
 ## Verify Installation
 
 ```bash
+# Show version
 greywall --version
+
+# Check dependencies, security features, and greyproxy status
+greywall check
 ```
 
 ## Your First Sandboxed Command
 
-By default, greywall blocks all network access:
+By default, greywall routes traffic through the GreyProxy SOCKS5 proxy at `localhost:43052` with DNS via `localhost:43053`. If greyproxy is not running, all network access is blocked:
 
 ```bash
-# This will fail - network is blocked
+# This will fail if greyproxy is not running
 greywall curl https://example.com
 ```
 
 You should see something like:
 
 ```text
-curl: (56) CONNECT tunnel failed, response 403
+curl: (7) Failed to connect to ... Connection refused
 ```
+
+Run `greywall setup` to install and start greyproxy, or use `greywall check` to verify its status.
 
 ## Route Through a Proxy
 
-Greywall routes all network traffic through an external SOCKS5 proxy. By default it connects to `socks5://localhost:43052` (the [GreyProxy](https://github.com/greyhavenhq/greyproxy) default). You can override this with `--proxy`:
+You can override the default proxy with `--proxy`:
 
 ```bash
 greywall --proxy socks5://localhost:1080 curl https://example.com

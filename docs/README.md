@@ -10,6 +10,7 @@ Greywall is a sandboxing tool that restricts network and filesystem access for a
 ## Guides
 
 - [Concepts](concepts.md) - Mental model: OS sandbox + local proxies + config
+- [Learning Mode](learning.md) - Automatically discover filesystem needs with `--learning`
 - [Troubleshooting](troubleshooting.md) - Common failure modes and fixes
 - [Using Greywall with AI agents](agents.md) - Defense-in-depth and policy standardization
 - [Recipes](recipes/README.md) - Common workflows (npm/pip/git/CI)
@@ -48,4 +49,13 @@ greywall -p 3000 <command>
 
 # Run shell command
 greywall -c "echo hello && ls"
+
+# Learn filesystem needs and generate a template
+greywall --learning -- <command>
+
+# Check dependencies and greyproxy status
+greywall check
+
+# Install and start greyproxy
+greywall setup
 ```

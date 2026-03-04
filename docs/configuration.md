@@ -102,10 +102,14 @@ Greywall routes all network traffic through an external SOCKS5 proxy. Domain fil
 
 | Field | Description |
 |-------|-------------|
-| `denyRead` | Paths to deny reading (deny-only pattern) |
+| `defaultDenyRead` | Deny reads by default, allowing only system paths, CWD, and `allowRead` entries (default: `true` when not set) |
+| `allowRead` | Paths to allow reading (used when `defaultDenyRead` is enabled) |
+| `denyRead` | Paths to deny reading (overrides `allowRead`) |
 | `allowWrite` | Paths to allow writing |
-| `denyWrite` | Paths to deny writing (takes precedence) |
+| `denyWrite` | Paths to deny writing (takes precedence over `allowWrite`) |
 | `allowGitConfig` | Allow writes to `.git/config` files |
+
+To opt out of deny-by-default reads, set `"defaultDenyRead": false`. Use `--learning` mode to automatically discover which paths a command needs. See [Learning Mode](learning.md).
 
 ## Command Configuration
 

@@ -37,10 +37,11 @@ Localhost is separate from external traffic:
 
 ### Filesystem
 
+- **Reads are denied by default** (`defaultDenyRead` is `true` when not set); only system paths, the current working directory, and explicitly allowed paths (`allowRead`) are accessible.
 - **Writes are denied by default**; you must opt in with `allowWrite`.
 - **denyWrite** can block specific files/patterns even if the parent directory is writable.
-- **denyRead** can block reads from sensitive paths.
-- Greywall includes an internal list of always-protected targets (e.g. shell configs, git hooks) to reduce common persistence vectors.
+- **denyRead** can block reads from specific paths even within allowed areas.
+- Greywall includes an internal list of always-protected targets (e.g. shell configs, git hooks, `.env` files) to reduce common persistence vectors.
 
 ### Environment sanitization
 

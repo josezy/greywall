@@ -71,7 +71,7 @@ if !greywall.IsSupported() {
 
 #### `DefaultConfig() *Config`
 
-Returns a default configuration with all network blocked.
+Returns a default configuration with all network blocked and deny-by-default filesystem reads enabled.
 
 ```go
 cfg := greywall.DefaultConfig()
@@ -187,10 +187,12 @@ type NetworkConfig struct {
 
 ```go
 type FilesystemConfig struct {
-    DenyRead       []string // Paths to deny read access
-    AllowWrite     []string // Paths to allow write access
-    DenyWrite      []string // Paths to explicitly deny write access
-    AllowGitConfig bool     // Allow read access to ~/.gitconfig
+    DefaultDenyRead *bool    // Deny reads by default (true when nil)
+    AllowRead       []string // Paths to allow reading (used with deny-by-default)
+    DenyRead        []string // Paths to deny read access
+    AllowWrite      []string // Paths to allow write access
+    DenyWrite       []string // Paths to explicitly deny write access
+    AllowGitConfig  bool     // Allow read access to ~/.gitconfig
 }
 ```
 

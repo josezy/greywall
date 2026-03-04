@@ -91,9 +91,16 @@ echo "$(whoami):100000:65536" | sudo tee -a /etc/subgid
 
 On most systems with package-manager-installed bwrap, this error shouldn't occur. If it does, your system may have non-standard security policies.
 
-## "curl: (56) CONNECT tunnel failed, response 403"
+## Network errors (connection refused, timeout, 403)
 
-This usually means the external proxy rejected the request (e.g., the domain is not allowed by the proxy's policy).
+**"Connection refused"** — greyproxy is not running. Install and start it:
+
+```bash
+greywall setup    # install and start greyproxy
+greywall check    # verify status
+```
+
+**"CONNECT tunnel failed, response 403"** — the proxy rejected the request (e.g., the domain is not allowed by the proxy's policy).
 
 Fix:
 
