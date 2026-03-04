@@ -22,7 +22,7 @@ greywall -c "rm -rf /"  # → blocked by command deny rules
 **Linux:**
 
 ```bash
-curl -fsSL https://github.com/GreyhavenHQ/greywall/raw/branch/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/GreyhavenHQ/greywall/main/install.sh | sh
 ```
 
 <details>
