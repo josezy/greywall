@@ -39,7 +39,7 @@ No, for most Linux systems. Greywall works without root privileges because:
 - Package-manager-installed `bubblewrap` is typically already setuid
 - Greywall detects available capabilities and adapts automatically
 
-If some features aren't available (like network namespaces in Docker/CI), greywall falls back gracefully - you'll still get filesystem isolation, command blocking, and proxy-based network filtering.
+If some features aren't available (like network namespaces in Docker/CI), greywall falls back gracefully - you'll still get filesystem isolation, command blocking, and proxy-based network routing.
 
 Run `greywall --linux-features` to see what's available in your environment.
 
@@ -64,25 +64,23 @@ You should see something like:
 curl: (56) CONNECT tunnel failed, response 403
 ```
 
-## Allow Specific Domains
+## Route Through a Proxy
 
-Create a config file at `~/.config/greywall/greywall.json` (or `~/Library/Application Support/greywall/greywall.json` on macOS):
+Greywall routes all network traffic through an external SOCKS5 proxy. By default it connects to `socks5://localhost:43052` (the [GreyProxy](https://github.com/greyhavenhq/greyproxy) default). You can override this with `--proxy`:
+
+```bash
+greywall --proxy socks5://localhost:1080 curl https://example.com
+```
+
+Or in a config file at `~/.config/greywall/greywall.json` (or `~/Library/Application Support/greywall/greywall.json` on macOS):
 
 ```json
 {
   "network": {
-    "allowedDomains": ["example.com"]
+    "proxyUrl": "socks5://localhost:1080"
   }
 }
 ```
-
-Now try again:
-
-```bash
-greywall curl https://example.com
-```
-
-This time it succeeds!
 
 ## Debug Mode
 

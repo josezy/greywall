@@ -270,7 +270,7 @@ if [[ "$NETWORK" == "true" ]]; then
         cat > "$NET_SETTINGS" << EOF
 {
   "network": {
-    "allowedDomains": ["127.0.0.1", "localhost"]
+    "allowLocalOutbound": true
   },
   "filesystem": {
     "allowWrite": ["$WORKSPACE"]

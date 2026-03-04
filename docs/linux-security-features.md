@@ -74,7 +74,7 @@ This provides **defense-in-depth**: both bwrap mounts AND Landlock kernel restri
 
 - **Impact**: `--unshare-net` is skipped; network is not fully isolated
 - **Cause**: Running in Docker, GitHub Actions, or other environments without `CAP_NET_ADMIN`
-- **Fallback**: Proxy-based filtering still works; filesystem/PID/seccomp isolation still active
+- **Fallback**: Proxy-based routing still works; filesystem/PID/seccomp isolation still active
 - **Check**: Run `greywall --linux-features` and look for "Network namespace (--unshare-net): false"
 - **Workaround**: Run with `sudo`, or in Docker use `--cap-add=NET_ADMIN`
 

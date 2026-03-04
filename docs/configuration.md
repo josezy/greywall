@@ -7,8 +7,8 @@ Example config:
 ```json
 {
   "network": {
-    "allowedDomains": ["github.com", "*.npmjs.org", "registry.yarnpkg.com"],
-    "deniedDomains": ["evil.com"]
+    "proxyUrl": "socks5://localhost:43052",
+    "dnsAddr": "localhost:43053"
   },
   "filesystem": {
     "denyRead": ["/etc/passwd"],
@@ -34,16 +34,16 @@ You can extend built-in templates or other config files using the `extends` fiel
 ```json
 {
   "extends": "code",
-  "network": {
-    "allowedDomains": ["private-registry.company.com"]
+  "filesystem": {
+    "allowWrite": [".", "/tmp"]
   }
 }
 ```
 
 This config:
 
-- Inherits all settings from the `code` template (LLM providers, package registries, filesystem protections, command restrictions)
-- Adds `private-registry.company.com` to the allowed domains list
+- Inherits all settings from the `code` template (filesystem protections, command restrictions)
+- Adds custom writable paths
 
 ### Extending a file
 
@@ -52,8 +52,8 @@ You can also extend other config files using absolute or relative paths:
 ```json
 {
   "extends": "./base-config.json",
-  "network": {
-    "allowedDomains": ["extra-domain.com"]
+  "command": {
+    "deny": ["git push"]
   }
 }
 ```
@@ -75,7 +75,7 @@ The `extends` value is treated as a file path if it contains `/` or `\`, or star
 
 ### Merge behavior
 
-- Slice fields (domains, paths, commands) are appended and deduplicated
+- Slice fields (paths, commands) are appended and deduplicated
 - Boolean fields use OR logic (true if either base or override enables it)
 - Integer fields (ports) use override-wins semantics (0 keeps base value)
 
@@ -87,29 +87,16 @@ See [templates.md](templates.md) for available templates.
 
 ## Network Configuration
 
+Greywall routes all network traffic through an external SOCKS5 proxy. Domain filtering and access control are handled by the proxy (e.g., [GreyProxy](https://github.com/greyhavenhq/greyproxy)), not by greywall itself.
+
 | Field | Description |
 |-------|-------------|
-| `allowedDomains` | List of allowed domains. Supports wildcards like `*.example.com` |
-| `deniedDomains` | List of denied domains (checked before allowed) |
+| `proxyUrl` | External SOCKS5 proxy URL (default: `socks5://localhost:43052`) |
+| `dnsAddr` | Host-side DNS server address (default: `localhost:43053`) |
 | `allowUnixSockets` | List of allowed Unix socket paths (macOS) |
 | `allowAllUnixSockets` | Allow all Unix sockets |
 | `allowLocalBinding` | Allow binding to local ports |
 | `allowLocalOutbound` | Allow outbound connections to localhost, e.g., local DBs (defaults to `allowLocalBinding` if not set) |
-| `httpProxyPort` | Fixed port for HTTP proxy (default: random available port) |
-| `socksProxyPort` | Fixed port for SOCKS5 proxy (default: random available port) |
-
-### Wildcard Domain Access
-
-Setting `allowedDomains: ["*"]` enables **relaxed network mode**:
-
-- Direct network connections are allowed (sandbox doesn't block outbound)
-- Proxy still runs for apps that respect `HTTP_PROXY`
-- `deniedDomains` is only enforced for apps using the proxy
-
-> [!WARNING]
-> **Security tradeoff**: Apps that ignore `HTTP_PROXY` will bypass `deniedDomains` filtering entirely.
-
-Use this when you need to support apps that don't respect proxy environment variables.
 
 ## Filesystem Configuration
 
@@ -286,7 +273,6 @@ greywall import --claude --extend local-dev-server --save
 
 By default, imports extend the `code` template which provides sensible defaults:
 
-- Network access for npm, GitHub, LLM providers, etc.
 - Filesystem protections for secrets and sensitive paths
 - Command restrictions for dangerous operations
 

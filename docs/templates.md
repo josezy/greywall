@@ -26,15 +26,15 @@ Instead of copying and modifying templates, you can extend them in your config f
 ```json
 {
   "extends": "code",
-  "network": {
-    "allowedDomains": ["private-registry.company.com"]
+  "filesystem": {
+    "allowWrite": [".", "/tmp"]
   }
 }
 ```
 
-This inherits all settings from the `code` template and adds your private registry. Settings are merged:
+This inherits all settings from the `code` template and adds custom writable paths. Settings are merged:
 
-- Slice fields (domains, paths, commands): Appended and deduplicated
+- Slice fields (paths, commands): Appended and deduplicated
 - Boolean fields: OR logic (true if either enables it)
 - Integer fields (ports): Override wins (0 keeps base value)
 
@@ -45,8 +45,8 @@ You can also extend other config files using file paths:
 ```json
 {
   "extends": "./shared/base-config.json",
-  "network": {
-    "allowedDomains": ["extra-domain.com"]
+  "command": {
+    "deny": ["git push"]
   }
 }
 ```
@@ -60,15 +60,11 @@ Chains are supported: a file can extend a template, and another file can extend 
 ```json
 {
   "extends": "code",
-  "network": {
-    "allowedDomains": [
-      "internal-npm.company.com",
-      "artifactory.company.com"
-    ],
-    "deniedDomains": ["competitor-analytics.com"]
-  },
   "filesystem": {
     "denyRead": ["~/.company-secrets/**"]
+  },
+  "command": {
+    "deny": ["npm publish"]
   }
 }
 ```
@@ -76,9 +72,8 @@ Chains are supported: a file can extend a template, and another file can extend 
 This config:
 
 - Extends the battle-tested `code` template
-- Adds company-specific package registries
-- Adds additional telemetry/analytics to deny list
 - Protects company-specific secret directories
+- Blocks publishing commands
 
 ## Available Templates
 

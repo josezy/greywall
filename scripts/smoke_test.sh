@@ -181,12 +181,9 @@ echo ""
 echo "=== Network Restrictions ==="
 echo ""
 
-# Reset settings to default (no domains allowed)
+# Reset settings to default (network through proxy)
 cat > "$SETTINGS_FILE" << EOF
 {
-  "network": {
-    "allowedDomains": []
-  },
   "filesystem": {
     "allowWrite": ["$WORKSPACE"]
   }
@@ -218,26 +215,6 @@ else
     skip_test "network blocked (curl)" "curl not installed"
 fi
 
-# Test with allowed domain (only if GREYWALL_TEST_NETWORK is set)
-if [[ "${GREYWALL_TEST_NETWORK:-}" == "1" ]]; then
-    cat > "$SETTINGS_FILE" << EOF
-{
-  "network": {
-    "allowedDomains": ["httpbin.org"]
-  },
-  "filesystem": {
-    "allowWrite": ["$WORKSPACE"]
-  }
-}
-EOF
-    if command_exists curl; then
-        run_test "allowed domain works" "pass" "$GREYWALL_BIN" -s "$SETTINGS_FILE" -c "curl -s --connect-timeout 5 --max-time 10 https://httpbin.org/get"
-    else
-        skip_test "allowed domain works" "curl not installed"
-    fi
-else
-    skip_test "allowed domain works" "GREYWALL_TEST_NETWORK not set"
-fi
 
 echo ""
 echo "=== Tool Compatibility ==="
@@ -278,7 +255,7 @@ run_test "GREYWALL_SANDBOX set" "pass" "$GREYWALL_BIN" -c 'test "$GREYWALL_SANDB
 cat > "$SETTINGS_FILE" << EOF
 {
   "network": {
-    "allowedDomains": ["example.com"]
+    "proxyUrl": "socks5://localhost:43052"
   },
   "filesystem": {
     "allowWrite": ["$WORKSPACE"]

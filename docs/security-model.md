@@ -17,22 +17,21 @@ Greywall is useful when you want to reduce risk from:
 
 ### Network
 
-- **Default deny**: outbound network is blocked unless explicitly allowed.
-- **Allowlisting by domain**: you can specify `allowedDomains` (with wildcard support like `*.example.com`).
+- **Default deny**: outbound network is blocked unless routed through the proxy.
+- **Transparent proxying**: all traffic is routed through an external SOCKS5 proxy via a TUN device (using `tun2socks`). The proxy (e.g., [GreyProxy](https://github.com/greyhavenhq/greyproxy)) handles domain filtering and access control.
 - **Localhost controls**: inbound binding and localhost outbound are separately controlled.
 
-Important: domain filtering does not inspect content. If you allow a domain, code can exfiltrate via that domain.
+Important: greywall does not perform domain filtering itself. Access control is delegated to the external proxy.
 
-#### How allowlisting works
+#### How network isolation works
 
-Greywall combines OS-level enforcement with proxy-based allowlisting:
+Greywall combines OS-level enforcement with transparent SOCKS5 proxying:
 
-- The OS sandbox / network namespace is expected to block direct outbound connections.
-- Domain allowlisting happens via local HTTP/SOCKS proxies and proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`).
+- The OS sandbox / network namespace blocks direct outbound connections.
+- A TUN device inside the sandbox routes all traffic through `tun2socks`, which forwards it to the external SOCKS5 proxy via a Unix socket bridge.
+- If TUN is unavailable, greywall falls back to setting proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`).
 
-If a program does not use proxy env vars (or uses a custom protocol/stack), it may not benefit from domain allowlisting. In that case it typically fails with connection errors rather than being "selectively allowed."
-
-Localhost is separate from "external domains":
+Localhost is separate from external traffic:
 
 - `allowLocalOutbound=false` can intentionally block connections to local services like Redis on `127.0.0.1:6379` (see the dev-server example).
 
@@ -62,20 +61,11 @@ This prevents a library injection attack where a sandboxed process writes a mali
 - **Hostile code containment**: assume determined attackers may escape via kernel/OS vulnerabilities.
 - **Resource limits**: CPU, memory, disk, fork bombs, etc. are out of scope.
 - **Content-based controls**: Greywall does not block data exfiltration to *allowed* destinations.
-- **Proxy limitations / protocol edge cases**: some programs may not respect proxy environment variables, so they won't get domain allowlisting unless you configure them to use a proxy (e.g. Node.js `http`/`https` without a proxy-aware client).
+- **TUN fallback limitations**: when the TUN device is unavailable, greywall falls back to proxy environment variables. Programs that ignore these variables (e.g. Node.js native `http`/`https`) won't be network-isolated in fallback mode.
 
-### Practical examples of proxy limitations
+### Content inspection
 
-The proxy approach works well for many tools (curl, wget, git, npm, pip), but not by default for some stacks:
-
-- Node.js native `http`/`https` (use a proxy-aware client, e.g. `undici` + `ProxyAgent`)
-- Raw socket connections (custom TCP/UDP protocols)
-
-Greywall's OS-level sandbox is still expected to block direct outbound connections; bypassing the proxy should fail rather than silently succeeding.
-
-### Domain-based filtering only
-
-Greywall does not inspect request content. If you allow a domain, a sandboxed process can still exfiltrate data to that domain.
+Greywall does not inspect request content. Access control is delegated to the external proxy.
 
 ### Not a hostile-code containment boundary
 

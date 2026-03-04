@@ -12,7 +12,7 @@ Many popular coding agents already include sandboxing. Greywall can still be use
 Treat an agent as "semi-trusted automation":
 
 - Restrict writes to the workspace (and maybe `/tmp`)
-- Allowlist only the network destinations you actually need
+- Configure the external proxy to allow only the network destinations you need
 - Use `-m` (monitor mode) to audit blocked attempts and tighten policy
 
 Greywall can also reduce the risk of running agents with fewer interactive permission prompts (e.g. "skip permissions"), as long as your Greywall config tightly scopes writes and outbound destinations. It's defense-in-depth, not a substitute for the agent's own safeguards.
@@ -21,9 +21,6 @@ Greywall can also reduce the risk of running agents with fewer interactive permi
 
 ```json
 {
-  "network": {
-    "allowedDomains": ["api.openai.com", "api.anthropic.com"]
-  },
   "filesystem": {
     "allowWrite": ["."]
   }
@@ -40,8 +37,8 @@ greywall --settings ./greywall.json <agent-command>
 
 We provide these template for guardrailing CLI coding agents:
 
-- [`code`](/internal/templates/code.json) - Strict deny-by-default network filtering via proxy. Works with agents that respect `HTTP_PROXY`. Blocks cloud metadata APIs, protects secrets, restricts dangerous commands.
-- [`code-relaxed`](/internal/templates/code-relaxed.json) - Allows direct network connections for agents that ignore `HTTP_PROXY`. Same filesystem/command protections as `code`, but `deniedDomains` only enforced for proxy-respecting apps.
+- [`code`](/internal/templates/code.json) - Routes all network traffic through an external SOCKS5 proxy. Protects secrets, restricts dangerous commands.
+- [`code-relaxed`](/internal/templates/code-relaxed.json) - Same filesystem/command protections as `code`, with relaxed network settings for environments where TUN is unavailable.
 
 You can use it like `greywall -t code -- claude`.
 

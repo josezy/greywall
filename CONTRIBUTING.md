@@ -65,8 +65,8 @@ make test-ci
 # Test blocked network request
 ./greywall curl https://example.com
 
-# Test with allowed domain
-echo '{"network":{"allowedDomains":["example.com"]}}' > /tmp/test.json
+# Test with proxy configured
+echo '{"network":{"proxyUrl":"socks5://localhost:43052"}}' > /tmp/test.json
 ./greywall -s /tmp/test.json curl https://example.com
 
 # Test monitor mode

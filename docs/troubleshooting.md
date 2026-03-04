@@ -35,7 +35,7 @@ Greywall automatically detects this limitation and falls back to running **witho
 **What's reduced:**
 
 - Network isolation via namespace is skipped
-- The proxy-based domain filtering still works (via `HTTP_PROXY`/`HTTPS_PROXY`)
+- Proxy-based routing still works (via `HTTP_PROXY`/`HTTPS_PROXY` env vars)
 - But programs that bypass proxy env vars won't be network-isolated
 
 **To check if your environment supports network namespaces:**
@@ -93,16 +93,13 @@ On most systems with package-manager-installed bwrap, this error shouldn't occur
 
 ## "curl: (56) CONNECT tunnel failed, response 403"
 
-This usually means:
-
-- the process tried to reach a domain that is **not allowed**, and
-- the request went through greywall's HTTP proxy, which returned `403`.
+This usually means the external proxy rejected the request (e.g., the domain is not allowed by the proxy's policy).
 
 Fix:
 
 - Run with monitor mode to see what was blocked:
   - `greywall -m <command>`
-- Add the required destination(s) to `network.allowedDomains`.
+- Update the proxy's configuration to allow the required destination(s).
 
 ## "It works outside greywall but not inside"
 
@@ -113,28 +110,15 @@ Start with:
 
 Common causes:
 
-- Missing `allowedDomains`
-- A tool attempting direct sockets that don't respect proxy environment variables
+- The external proxy is not running or rejecting the request
 - Localhost outbound blocked (DB/cache on `127.0.0.1`)
 - Writes blocked (you didn't include a directory in `filesystem.allowWrite`)
 
-## Node.js HTTP(S) doesn't use proxy env vars by default
+## Node.js HTTP(S) and proxy env vars
 
-Node's built-in `http`/`https` modules ignore `HTTP_PROXY`/`HTTPS_PROXY`.
+Node's built-in `http`/`https` modules ignore `HTTP_PROXY`/`HTTPS_PROXY`. With greywall's default TUN-based transparent proxying, this is not an issue — all traffic is routed through the proxy regardless of whether the application respects proxy environment variables.
 
-If your Node code makes outbound HTTP(S) requests, use a proxy-aware client.
-For example with `undici`:
-
-```javascript
-import { ProxyAgent, fetch } from "undici";
-
-const proxyUrl = process.env.HTTPS_PROXY;
-const response = await fetch(url, {
-  dispatcher: new ProxyAgent(proxyUrl),
-});
-```
-
-Greywall's OS-level sandbox should still block direct connections; the above makes your requests go through the filtering proxy so allowlisting works as intended.
+If TUN is unavailable (fallback mode), Node apps that make direct HTTP(S) requests will need a proxy-aware client like `undici` with `ProxyAgent` to route through the proxy.
 
 ## Local services (Redis/Postgres/etc.) fail inside the sandbox
 

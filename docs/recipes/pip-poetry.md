@@ -6,9 +6,6 @@ Goal: allow Python dependency fetching while keeping egress minimal.
 
 ```json
 {
-  "network": {
-    "allowedDomains": ["pypi.org", "files.pythonhosted.org"]
-  },
   "filesystem": {
     "allowWrite": [".", "/tmp"]
   }
@@ -33,4 +30,4 @@ greywall --settings ./greywall.json poetry install
 greywall -m --settings ./greywall.json poetry install
 ```
 
-If you use private indexes, add those domains explicitly.
+If you use private indexes, configure your proxy to allow those domains.

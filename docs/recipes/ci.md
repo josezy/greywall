@@ -6,9 +6,6 @@ Goal: make CI steps safer by default: minimal egress and controlled writes.
 
 ```json
 {
-  "network": {
-    "allowedDomains": []
-  },
   "filesystem": {
     "allowWrite": [".", "/tmp"]
   }
@@ -29,8 +26,4 @@ Use monitor mode to discover what a job tries to reach:
 greywall -m --settings ./greywall.json -c "make test"
 ```
 
-Then allowlist only:
-
-- your artifact/cache endpoints
-- the minimum package registries required
-- any internal services the job must access
+Then configure your proxy to allow only the required destinations (artifact/cache endpoints, package registries, internal services).

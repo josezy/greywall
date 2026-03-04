@@ -3,7 +3,7 @@
 Greywall restricts network, filesystem, and command access for arbitrary commands. It works by:
 
 1. **Blocking commands** via configurable deny/allow lists before execution
-2. **Intercepting network traffic** via HTTP/SOCKS5 proxies that filter by domain
+2. **Routing network traffic** through an external SOCKS5 proxy (e.g., [GreyProxy](https://github.com/greyhavenhq/greyproxy)) via transparent TUN-based proxying
 3. **Sandboxing processes** using OS-native mechanisms (macOS sandbox-exec, Linux bubblewrap)
 4. **Sanitizing environment** by stripping dangerous variables (LD_PRELOAD, DYLD_INSERT_LIBRARIES, etc.)
 
@@ -15,16 +15,19 @@ flowchart TB
         CmdCheck["Command<br/>Blocking"]
         EnvSanitize["Env<br/>Sanitization"]
         Sandbox["Platform Sandbox<br/>(macOS/Linux)"]
-        HTTP["HTTP Proxy<br/>(filtering)"]
-        SOCKS["SOCKS5 Proxy<br/>(filtering)"]
+    end
+
+    subgraph External
+        Proxy["SOCKS5 Proxy<br/>(e.g. GreyProxy)"]
+        DNS["DNS Server"]
     end
 
     Config --> Manager
     Manager --> CmdCheck
     CmdCheck --> EnvSanitize
     EnvSanitize --> Sandbox
-    Manager --> HTTP
-    Manager --> SOCKS
+    Sandbox -->|tun2socks| Proxy
+    Sandbox -->|DNS bridge| DNS
 ```
 
 ## Project Structure
@@ -36,7 +39,7 @@ greywall/
 ├── internal/            # Private implementation
 │   ├── config/          # Configuration loading/validation
 │   ├── platform/        # OS detection
-│   ├── proxy/           # HTTP and SOCKS5 filtering proxies
+│   ├── proxy/           # GreyProxy detection, installation, and lifecycle
 │   └── sandbox/         # Platform-specific sandboxing
 │       ├── manager.go   # Orchestrates sandbox lifecycle
 │       ├── macos.go     # macOS sandbox-exec profiles
@@ -64,7 +67,7 @@ Handles loading and validating sandbox configuration:
 
 ```go
 type Config struct {
-    Network    NetworkConfig    // Domain allow/deny lists
+    Network    NetworkConfig    // Proxy URL, DNS, localhost controls
     Filesystem FilesystemConfig // Read/write restrictions
     Command    CommandConfig    // Command deny/allow lists
     AllowPty   bool             // Allow pseudo-terminal allocation
@@ -86,27 +89,13 @@ func IsSupported() bool // True for MacOS and Linux
 
 ### Proxy (`internal/proxy/`)
 
-Two proxy servers that filter traffic by domain:
+Manages the external GreyProxy lifecycle (detection, installation, startup):
 
-#### HTTP Proxy (`http.go`)
+- `detect.go` - Checks if greyproxy is installed and running (health endpoint)
+- `install.go` - Downloads and installs greyproxy from GitHub releases
+- `start.go` - Starts the greyproxy service
 
-- Handles HTTP and HTTPS (via CONNECT tunneling)
-- Extracts domain from Host header or CONNECT request
-- Returns 403 for blocked domains
-- Listens on random available port
-
-#### SOCKS5 Proxy (`socks.go`)
-
-- Uses `github.com/things-go/go-socks5`
-- Handles TCP connections (git, ssh, etc.)
-- Same domain filtering logic as HTTP proxy
-- Listens on random available port
-
-**Domain Matching:**
-
-- Exact match: `example.com`
-- Wildcard prefix: `*.example.com` (matches `api.example.com`)
-- Deny takes precedence over allow
+Domain filtering and access control are handled entirely by the external proxy, not by greywall.
 
 ### Sandbox (`internal/sandbox/`)
 
@@ -114,8 +103,8 @@ Two proxy servers that filter traffic by domain:
 
 Orchestrates the sandbox lifecycle:
 
-1. Initializes HTTP and SOCKS proxies
-2. Sets up platform-specific bridges (Linux)
+1. Sets up proxy and DNS bridges to the external SOCKS5 proxy (Linux)
+2. Extracts embedded `tun2socks` binary for transparent proxying
 3. Checks command against deny/allow lists
 4. Wraps commands with sandbox restrictions
 5. Handles cleanup on exit
@@ -172,44 +161,41 @@ Seatbelt profiles are generated dynamically based on config:
 
 #### Linux Implementation (`linux.go`)
 
-Uses `bubblewrap` (bwrap) with network namespace isolation:
+Uses `bubblewrap` (bwrap) with network namespace isolation and transparent SOCKS5 proxying:
 
 ```mermaid
 flowchart TB
     subgraph Host
-        HTTP["HTTP Proxy<br/>:random"]
-        SOCKS["SOCKS Proxy<br/>:random"]
-        HSOCAT["socat<br/>(HTTP bridge)"]
-        SSOCAT["socat<br/>(SOCKS bridge)"]
+        PROXY["External SOCKS5 Proxy<br/>(e.g. GreyProxy :43052)"]
+        DNS["DNS Server<br/>(:43053)"]
+        PSOCAT["socat<br/>(proxy bridge)"]
+        DSOCAT["socat<br/>(DNS bridge)"]
         USOCK["Unix Sockets<br/>/tmp/greywall-*.sock"]
     end
 
     subgraph Sandbox ["Sandbox (bwrap --unshare-net)"]
         CMD["User Command"]
-        ISOCAT["socat :3128"]
-        ISOCKS["socat :1080"]
-        ENV2["HTTP_PROXY=127.0.0.1:3128"]
+        TUN["tun2socks<br/>(TUN device)"]
+        ISOCAT["socat<br/>(relay)"]
     end
 
-    HTTP <--> HSOCAT
-    SOCKS <--> SSOCAT
-    HSOCAT <--> USOCK
-    SSOCAT <--> USOCK
+    PROXY <--> PSOCAT
+    DNS <--> DSOCAT
+    PSOCAT <--> USOCK
+    DSOCAT <--> USOCK
     USOCK <-->|bind-mounted| ISOCAT
-    USOCK <-->|bind-mounted| ISOCKS
-    CMD --> ISOCAT
-    CMD --> ISOCKS
-    CMD -.-> ENV2
+    CMD -->|all traffic| TUN
+    TUN --> ISOCAT
 ```
 
-**Why socat bridges?**
+**How it works:**
 
-With `--unshare-net`, the sandbox has its own isolated network namespace - it cannot reach the host's network at all. Unix sockets provide filesystem-based IPC that works across namespace boundaries:
+With `--unshare-net`, the sandbox has its own isolated network namespace. Unix sockets provide filesystem-based IPC across namespace boundaries:
 
-1. Host creates Unix socket, connects to TCP proxy
-2. Socket file is bind-mounted into sandbox
-3. Sandbox's socat listens on localhost:3128, forwards to Unix socket
-4. Traffic flows: `sandbox:3128 → Unix socket → host proxy → internet`
+1. Host creates Unix sockets, connects via socat to the external SOCKS5 proxy and DNS server
+2. Socket files are bind-mounted into the sandbox
+3. Inside the sandbox, a TUN device routes all traffic through `tun2socks`, which forwards to the external proxy via the Unix socket bridge
+4. If TUN is unavailable, greywall falls back to setting proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`)
 
 ## Inbound Connections (Reverse Bridge)
 
@@ -249,10 +235,10 @@ flowchart TD
     B --> C["3. Create Manager"]
     C --> D["4. Manager.Initialize()"]
 
-    D --> D1["Start HTTP proxy"]
-    D --> D2["Start SOCKS proxy"]
-    D --> D3["[Linux] Create socat bridges"]
-    D --> D4["[Linux] Create reverse bridges"]
+    D --> D1["Extract tun2socks binary"]
+    D --> D2["[Linux] Create proxy bridge (socat → external SOCKS5)"]
+    D --> D3["[Linux] Create DNS bridge (socat → DNS server)"]
+    D --> D4["[Linux] Create reverse bridges (exposed ports)"]
 
     D1 & D2 & D3 & D4 --> E["5. Manager.WrapCommand()"]
 
@@ -265,9 +251,8 @@ flowchart TD
     F --> G["7. Execute wrapped command"]
     G --> H["8. Manager.Cleanup()"]
 
-    H --> H1["Kill socat processes"]
+    H --> H1["Kill socat/tun2socks processes"]
     H --> H2["Remove Unix sockets"]
-    H --> H3["Stop proxy servers"]
 ```
 
 ## Platform Comparison
@@ -276,11 +261,11 @@ flowchart TD
 |---------|-------|-------|
 | Sandbox mechanism | sandbox-exec (Seatbelt) | bubblewrap + Landlock + seccomp |
 | Network isolation | Syscall filtering | Network namespace |
-| Proxy routing | Environment variables | socat bridges + env vars |
+| Proxy routing | Environment variables | tun2socks + socat bridges (fallback: env vars) |
 | Filesystem control | Profile rules | Bind mounts + Landlock (5.13+) |
 | Syscall filtering | Implicit (Seatbelt) | seccomp BPF |
 | Inbound connections | Profile rules (`network-bind`) | Reverse socat bridges |
-| Violation monitoring | log stream + proxy | eBPF + proxy |
+| Violation monitoring | log stream | eBPF |
 | Env sanitization | Strips DYLD_* | Strips LD_* |
 | Requirements | Built-in | bwrap, socat |
 
@@ -306,11 +291,8 @@ The `-m` (monitor) flag enables real-time visibility into blocked operations. Th
 
 | Prefix | Source | Description |
 |--------|--------|-------------|
-| `[greywall:http]` | Both | HTTP/HTTPS proxy (blocked requests only in monitor mode) |
-| `[greywall:socks]` | Both | SOCKS5 proxy (blocked requests only in monitor mode) |
 | `[greywall:logstream]` | macOS only | Kernel-level sandbox violations from `log stream` |
 | `[greywall:ebpf]` | Linux only | Filesystem/syscall failures (requires CAP_BPF or root) |
-| `[greywall:filter]` | Both | Domain filter rule matches (debug mode only) |
 
 ### macOS Log Stream
 
@@ -336,11 +318,11 @@ Filtered out (too noisy):
 
 ### Debug vs Monitor Mode
 
-| Flag | Proxy logs | Filter rules | Log stream | Sandbox command |
-|------|------------|--------------|------------|-----------------|
-| `-m` | Blocked only | No | Yes (macOS) | No |
-| `-d` | All | Yes | No | Yes |
-| `-m -d` | All | Yes | Yes (macOS) | Yes |
+| Flag | Log stream | eBPF | Sandbox command |
+|------|------------|------|-----------------|
+| `-m` | Yes (macOS) | Yes (Linux) | No |
+| `-d` | No | No | Yes |
+| `-m -d` | Yes (macOS) | Yes (Linux) | Yes |
 
 ## Security Model
 

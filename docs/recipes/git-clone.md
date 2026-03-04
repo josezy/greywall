@@ -6,9 +6,6 @@ Goal: allow fetching code from a limited set of hosts.
 
 ```json
 {
-  "network": {
-    "allowedDomains": ["github.com", "api.github.com", "codeload.github.com"]
-  },
   "filesystem": {
     "allowWrite": ["."]
   }
