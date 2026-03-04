@@ -13,19 +13,23 @@ TUN2SOCKS_BIN_DIR=internal/sandbox/bin
 all: build
 
 download-tun2socks:
-	@echo "Downloading tun2socks $(TUN2SOCKS_VERSION)..."
 	@mkdir -p $(TUN2SOCKS_BIN_DIR)
-	@curl -sL "https://github.com/xjasonlyu/tun2socks/releases/download/$(TUN2SOCKS_VERSION)/tun2socks-linux-amd64.zip" -o /tmp/tun2socks-linux-amd64.zip
-	@unzip -o -q /tmp/tun2socks-linux-amd64.zip -d /tmp/tun2socks-amd64
-	@mv /tmp/tun2socks-amd64/tun2socks-linux-amd64 $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-amd64
-	@chmod +x $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-amd64
-	@rm -rf /tmp/tun2socks-linux-amd64.zip /tmp/tun2socks-amd64
-	@curl -sL "https://github.com/xjasonlyu/tun2socks/releases/download/$(TUN2SOCKS_VERSION)/tun2socks-linux-arm64.zip" -o /tmp/tun2socks-linux-arm64.zip
-	@unzip -o -q /tmp/tun2socks-linux-arm64.zip -d /tmp/tun2socks-arm64
-	@mv /tmp/tun2socks-arm64/tun2socks-linux-arm64 $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-arm64
-	@chmod +x $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-arm64
-	@rm -rf /tmp/tun2socks-linux-arm64.zip /tmp/tun2socks-arm64
-	@echo "tun2socks binaries downloaded to $(TUN2SOCKS_BIN_DIR)/"
+	@if [ -f $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-amd64 ] && [ -f $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-arm64 ]; then \
+		echo "tun2socks binaries already cached in $(TUN2SOCKS_BIN_DIR)/"; \
+	else \
+		echo "Downloading tun2socks $(TUN2SOCKS_VERSION)..."; \
+		curl -sL "https://github.com/xjasonlyu/tun2socks/releases/download/$(TUN2SOCKS_VERSION)/tun2socks-linux-amd64.zip" -o /tmp/tun2socks-linux-amd64.zip; \
+		unzip -o -q /tmp/tun2socks-linux-amd64.zip -d /tmp/tun2socks-amd64; \
+		mv /tmp/tun2socks-amd64/tun2socks-linux-amd64 $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-amd64; \
+		chmod +x $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-amd64; \
+		rm -rf /tmp/tun2socks-linux-amd64.zip /tmp/tun2socks-amd64; \
+		curl -sL "https://github.com/xjasonlyu/tun2socks/releases/download/$(TUN2SOCKS_VERSION)/tun2socks-linux-arm64.zip" -o /tmp/tun2socks-linux-arm64.zip; \
+		unzip -o -q /tmp/tun2socks-linux-arm64.zip -d /tmp/tun2socks-arm64; \
+		mv /tmp/tun2socks-arm64/tun2socks-linux-arm64 $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-arm64; \
+		chmod +x $(TUN2SOCKS_BIN_DIR)/tun2socks-linux-arm64; \
+		rm -rf /tmp/tun2socks-linux-arm64.zip /tmp/tun2socks-arm64; \
+		echo "tun2socks binaries downloaded to $(TUN2SOCKS_BIN_DIR)/"; \
+	fi
 
 build: download-tun2socks
 	@echo "Building $(BINARY_NAME)..."
