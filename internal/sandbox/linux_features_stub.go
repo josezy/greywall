@@ -58,20 +58,19 @@ func (f *LinuxFeatures) MinimumViable() bool {
 	return false
 }
 
-// PrintDependencyStatus prints dependency status for non-Linux platforms.
-func PrintDependencyStatus() {
+// PrintDependencyStatus prints dependency status for non-Linux platforms and returns remediation steps.
+func PrintDependencyStatus() []string {
 	if runtime.GOOS == "darwin" {
-		fmt.Printf("\n  Platform: macOS\n")
-		fmt.Printf("\n  Dependencies (required):\n")
+		fmt.Printf("Platform: macOS\n")
+		fmt.Printf("\nChecking system capabilities:\n")
 		if _, err := exec.LookPath("sandbox-exec"); err == nil {
-			fmt.Printf("    ✓ sandbox-exec (Seatbelt)\n")
-			fmt.Printf("\n  Status: ready\n")
+			fmt.Println(CheckOK("sandbox-exec (Seatbelt)"))
 		} else {
-			fmt.Printf("    ✗ sandbox-exec — REQUIRED (should be built-in on macOS)\n")
-			fmt.Printf("\n  Status: missing required dependencies\n")
+			fmt.Println(CheckFail("sandbox-exec — required (should be built-in on macOS)"))
+			return []string{"Reinstall macOS Command Line Tools (sandbox-exec should be built-in)"}
 		}
 	} else {
-		fmt.Printf("\n  Platform: %s (unsupported)\n", runtime.GOOS)
-		fmt.Printf("\n  Status: this platform is not supported\n")
+		fmt.Printf("Platform: %s (unsupported)\n", runtime.GOOS)
 	}
+	return nil
 }

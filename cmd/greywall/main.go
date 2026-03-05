@@ -427,29 +427,47 @@ and greyproxy installation/running status.`,
 
 func runCheck(_ *cobra.Command, _ []string) error {
 	fmt.Printf("greywall - lightweight, container-free sandbox for running untrusted commands\n")
-	fmt.Printf("  Version: %s\n", version)
-	fmt.Printf("  Built:   %s\n", buildTime)
-	fmt.Printf("  Commit:  %s\n", gitCommit)
+	fmt.Printf("Version: %s\n", version)
+	fmt.Printf("Built:   %s\n", buildTime)
+	fmt.Printf("Commit:  %s\n", gitCommit)
 
-	sandbox.PrintDependencyStatus()
+	steps := sandbox.PrintDependencyStatus()
 
-	fmt.Printf("\n  Greyproxy:\n")
 	status := proxy.Detect()
 	if status.Installed {
 		if status.Version != "" {
-			fmt.Printf("    ✓ installed (v%s) at %s\n", status.Version, status.Path)
+			fmt.Println(sandbox.CheckOK(fmt.Sprintf("greyproxy (v%s)", status.Version)))
 		} else {
-			fmt.Printf("    ✓ installed at %s\n", status.Path)
+			fmt.Println(sandbox.CheckOK("greyproxy"))
 		}
 		if status.Running {
-			fmt.Printf("    ✓ running (SOCKS5 :43052, DNS :43053, Dashboard :43080)\n")
+			fmt.Println(sandbox.CheckOK("greyproxy running (SOCKS5 :43052, DNS :43053)"))
+			fmt.Printf("    Dashboard: https://localhost:43080\n")
 		} else {
-			fmt.Printf("    ✗ not running\n")
-			fmt.Printf("      Start with: greywall setup\n")
+			fmt.Println(sandbox.CheckFail("greyproxy running"))
+			steps = append(steps, "greywall setup")
 		}
 	} else {
-		fmt.Printf("    ✗ not installed\n")
-		fmt.Printf("      Install with: greywall setup\n")
+		fmt.Println(sandbox.CheckFail("greyproxy"))
+		fmt.Println(sandbox.CheckFail("greyproxy running"))
+		steps = append(steps, "greywall setup")
+	}
+
+	if len(steps) > 0 {
+		steps = append(steps, "Run 'greywall check' again to verify")
+		fmt.Printf("\nNext steps:\n")
+		for i, step := range steps {
+			fmt.Printf("  %d. %s\n", i+1, step)
+		}
+	} else {
+		fmt.Printf("\nAll checks passed. Welcome to greywall :)\n")
+		fmt.Printf("\nGet started:\n")
+		fmt.Printf("  1. Open your dashboard: https://localhost:43080\n")
+		fmt.Printf("  2. Try it: greywall -- curl https://greyhaven.co\n")
+		fmt.Printf("     The request will be blocked — allow it on the dashboard, then try again\n")
+		fmt.Printf("  3. Learn a tool: greywall --learning -- opencode\n")
+		fmt.Printf("  4. Review the template: greywall templates show opencode\n")
+		fmt.Printf("  5. Run with the template: greywall -- opencode\n")
 	}
 
 	return nil

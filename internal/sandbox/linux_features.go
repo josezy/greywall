@@ -276,69 +276,73 @@ func (f *LinuxFeatures) MinimumViable() bool {
 	return f.HasBwrap && f.HasSocat
 }
 
-// PrintDependencyStatus prints dependency status with install suggestions for Linux.
-func PrintDependencyStatus() {
+// PrintDependencyStatus prints a flat ✓/✗ checklist for Linux and returns remediation steps for any issues found.
+func PrintDependencyStatus() []string {
 	features := DetectLinuxFeatures()
+	var steps []string
 
-	fmt.Printf("\n  Platform: linux (kernel %d.%d)\n", features.KernelMajor, features.KernelMinor)
+	fmt.Printf("Platform: linux (kernel %d.%d)\n", features.KernelMajor, features.KernelMinor)
+	fmt.Printf("\nChecking system capabilities:\n")
 
-	fmt.Printf("\n  Dependencies (required):\n")
-
-	allGood := true
+	// Required dependencies
 	if features.HasBwrap {
-		fmt.Printf("    ✓ bubblewrap (bwrap)\n")
+		fmt.Println(CheckOK("bubblewrap"))
 	} else {
-		fmt.Printf("    ✗ bubblewrap (bwrap) — REQUIRED\n")
-		allGood = false
+		fmt.Println(CheckFail("bubblewrap — required"))
 	}
 	if features.HasSocat {
-		fmt.Printf("    ✓ socat\n")
+		fmt.Println(CheckOK("socat"))
 	} else {
-		fmt.Printf("    ✗ socat — REQUIRED\n")
-		allGood = false
+		fmt.Println(CheckFail("socat — required"))
 	}
 
-	if !allGood {
-		fmt.Printf("\n  Install missing dependencies:\n")
-		fmt.Printf("    %s\n", suggestInstallCmd(features))
+	if !features.HasBwrap || !features.HasSocat {
+		steps = append(steps, suggestInstallCmd(features))
 	}
 
-	fmt.Printf("\n  Security features: %s\n", features.Summary())
+	// Security features
+	if features.HasSeccomp {
+		fmt.Println(CheckOK("seccomp"))
+	} else {
+		fmt.Println(CheckFail("seccomp"))
+	}
+	if features.CanUseLandlock() {
+		fmt.Println(CheckOK(fmt.Sprintf("landlock (v%d)", features.LandlockABI)))
+	} else {
+		fmt.Println(CheckFail("landlock"))
+	}
 
+	// Network isolation (transparent proxy via tun2socks + network namespace)
 	if features.CanUseTransparentProxy() {
-		fmt.Printf("  Transparent proxy: available\n")
+		fmt.Println(CheckOK("network isolation"))
 	} else {
-		parts := []string{}
+		var missing []string
 		if !features.HasIpCommand {
-			parts = append(parts, "iproute2")
+			missing = append(missing, "iproute2")
 		}
 		if !features.HasDevNetTun {
-			parts = append(parts, "/dev/net/tun")
+			missing = append(missing, "/dev/net/tun")
 		}
 		if !features.CanUnshareNet {
-			parts = append(parts, "network namespace")
+			missing = append(missing, "network namespace")
 		}
-		if len(parts) > 0 {
-			fmt.Printf("  Transparent proxy: unavailable (missing: %s)\n", strings.Join(parts, ", "))
+		if len(missing) > 0 {
+			fmt.Println(CheckFail(fmt.Sprintf("network isolation (missing: %s)", strings.Join(missing, ", "))))
 		} else {
-			fmt.Printf("  Transparent proxy: unavailable\n")
+			fmt.Println(CheckFail("network isolation"))
 		}
 
 		if !features.CanUnshareNet && features.HasBwrap {
 			if val := readSysctl("kernel/apparmor_restrict_unprivileged_userns"); val == "1" {
-				fmt.Printf("\n  Note: AppArmor is restricting unprivileged user namespaces.\n")
-				fmt.Printf("  This prevents bwrap --unshare-net (needed for transparent proxy).\n")
-				fmt.Printf("  To fix:  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\n")
-				fmt.Printf("  Persist: echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/99-greywall-userns.conf\n")
+				steps = append(steps,
+					"sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0",
+					"echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/99-greywall-userns.conf",
+				)
 			}
 		}
 	}
 
-	if allGood {
-		fmt.Printf("\n  Status: ready\n")
-	} else {
-		fmt.Printf("\n  Status: missing required dependencies\n")
-	}
+	return steps
 }
 
 func suggestInstallCmd(features *LinuxFeatures) string {

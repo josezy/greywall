@@ -35,7 +35,7 @@ type healthResponse struct {
 	Ports   map[string]int `json:"ports"`
 }
 
-var versionRegex = regexp.MustCompile(`^greyproxy\s+(\S+)`)
+var versionRegex = regexp.MustCompile(`^greyproxy\s+v?(\S+)`)
 
 // Detect checks greyproxy installation status, version, and whether it's running.
 // This function never returns an error; all detection failures are captured
