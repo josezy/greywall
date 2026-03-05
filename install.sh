@@ -44,44 +44,44 @@ CHECKSUM_URL="https://github.com/$REPO/releases/download/${VERSION}/checksums.tx
 
 # Show what we're about to do
 echo ""
-echo "  Greywall Installer"
-echo "  -------------------"
+echo "Greywall Installer"
+echo "-------------------"
 echo ""
-echo "  Version:       $VERSION_NUM"
-echo "  Platform:      ${OS} ${ARCH}"
-echo "  Install to:    $INSTALL_DIR"
-echo "  Release notes: https://github.com/$REPO/releases/tag/$VERSION"
+echo "Version:       $VERSION_NUM"
+echo "Platform:      ${OS} ${ARCH}"
+echo "Install to:    $INSTALL_DIR"
+echo "Release notes: https://github.com/$REPO/releases/tag/$VERSION"
 
 # Check for existing installation
 UPGRADE=""
 if [ -x "$INSTALL_DIR/$BINARY" ]; then
   CURRENT=$("$INSTALL_DIR/$BINARY" -v 2>/dev/null | awk '{print $2}' || echo "unknown")
-  echo "  Current:       $CURRENT"
+  echo "Current:       $CURRENT"
   UPGRADE=1
 fi
 
 echo ""
-echo "  This will:"
-echo "    1. Download greywall $VERSION from GitHub"
-echo "    2. Verify the download checksum"
-echo "    3. Install the binary to $INSTALL_DIR"
+echo "This will:"
+echo "  1. Download greywall $VERSION from GitHub"
+echo "  2. Verify the download checksum"
+echo "  3. Install the binary to $INSTALL_DIR"
 echo ""
 
 if [ -n "$UPGRADE" ]; then
-  printf "  Replace existing installation? [y/N] "
+  printf "Replace existing installation? [y/N] "
 else
-  printf "  Proceed with installation? [Y/n] "
+  printf "Proceed with installation? [Y/n] "
 fi
 read -r REPLY </dev/tty
 
 if [ -n "$UPGRADE" ]; then
   case "$REPLY" in
     [yY]*) ;;
-    *)     echo "  Aborted."; exit 0 ;;
+    *)     echo "Aborted."; exit 0 ;;
   esac
 else
   case "$REPLY" in
-    [nN]*) echo "  Aborted."; exit 0 ;;
+    [nN]*) echo "Aborted."; exit 0 ;;
     *)     ;;
   esac
 fi
@@ -91,7 +91,7 @@ echo ""
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-echo "  Downloading greywall $VERSION..."
+echo "Downloading greywall $VERSION..."
 curl -fsSL -o "$TMP/archive.tar.gz" "$URL"
 
 # Verify checksum
@@ -108,9 +108,9 @@ if [ -n "$SHA_CMD" ]; then
   EXPECTED=$(grep "${BINARY}_${VERSION_NUM}_${OS}_${ARCH}.tar.gz" "$TMP/checksums.txt" | awk '{print $1}')
   ACTUAL=$($SHA_CMD "$TMP/archive.tar.gz" | awk '{print $1}')
   if [ "$EXPECTED" != "$ACTUAL" ]; then
-    echo "  Error: checksum mismatch"; exit 1
+    echo "Error: checksum mismatch"; exit 1
   fi
-  echo "  Checksum verified."
+  echo "Checksum verified."
 fi
 
 tar -xzf "$TMP/archive.tar.gz" -C "$TMP"
@@ -120,15 +120,15 @@ mkdir -p "$INSTALL_DIR"
 mv "$TMP/$BINARY" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/$BINARY"
 
-echo "  Installed greywall $VERSION to $INSTALL_DIR"
+echo "Installed greywall $VERSION to $INSTALL_DIR"
 
 # Check if greyproxy is installed, offer to set it up if not
 if ! command -v greyproxy >/dev/null 2>&1 && [ ! -x "$INSTALL_DIR/greyproxy" ]; then
   echo ""
-  echo "  greyproxy is not installed."
-  echo "  It pairs with greywall to proxy and filter network traffic for all sandboxed commands."
+  echo "greyproxy is not installed."
+  echo "It pairs with greywall to proxy and filter network traffic for all sandboxed commands."
   echo ""
-  printf "  Install greyproxy now? [Y/n] "
+  printf "Install greyproxy now? [Y/n] "
   read -r REPLY </dev/tty
   case "$REPLY" in
     [nN]*) ;;
@@ -140,18 +140,23 @@ case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *)
     echo ""
-    echo "  $INSTALL_DIR is not in your PATH."
-    echo "  To use greywall right now, run:"
-    echo "    export PATH=\"\$PATH:$INSTALL_DIR\""
+    echo "$INSTALL_DIR is not in your PATH."
+    echo "To use greywall right now, run:"
+    echo "  export PATH=\"\$PATH:$INSTALL_DIR\""
     echo ""
-    echo "  To make it permanent, add that line to your shell profile:"
+    echo "To make it permanent, add that line to your shell profile:"
     SHELL_NAME=$(basename "${SHELL:-/bin/sh}")
     case "$SHELL_NAME" in
-      zsh)  echo "    echo 'export PATH=\"\$PATH:$INSTALL_DIR\"' >> ~/.zshrc" ;;
-      bash) echo "    echo 'export PATH=\"\$PATH:$INSTALL_DIR\"' >> ~/.bashrc" ;;
-      fish) echo "    fish_add_path $INSTALL_DIR" ;;
-      *)    echo "    echo 'export PATH=\"\$PATH:$INSTALL_DIR\"' >> ~/.\${SHELL}rc" ;;
+      zsh)  echo "  echo 'export PATH=\"\$PATH:$INSTALL_DIR\"' >> ~/.zshrc" ;;
+      bash) echo "  echo 'export PATH=\"\$PATH:$INSTALL_DIR\"' >> ~/.bashrc" ;;
+      fish) echo "  fish_add_path $INSTALL_DIR" ;;
+      *)    echo "  echo 'export PATH=\"\$PATH:$INSTALL_DIR\"' >> ~/.\${SHELL}rc" ;;
     esac
     ;;
 esac
+
 echo ""
+echo "----"
+echo ""
+
+"$INSTALL_DIR/$BINARY" check
