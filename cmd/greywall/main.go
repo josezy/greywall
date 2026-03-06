@@ -222,8 +222,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 				// Explicit --template but file doesn't exist
 				return fmt.Errorf("learned template %q not found at %s\nRun: greywall templates list", templateName, templatePath)
 			case cmdName != "":
-				// No template found for this command - suggest creating one
-				fmt.Fprintf(os.Stderr, "[greywall] No learned template for %q. Run with --learning to create one.\n", cmdName)
+				if debug {
+					// No template found for this command - suggest creating one
+					fmt.Fprintf(os.Stderr, "[greywall] No learned template for %q. Run with --learning to create one.\n", cmdName)
+				}
 			}
 		}
 	}
