@@ -94,9 +94,12 @@ homebrew_casks:
     license: "Apache-2.0"
     binaries:
       - greywall
-    preflight: |
-      binary = "#{staged_path}/greywall"
-      system_command "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", binary]
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/greywall"]
+          end
     dependencies:
       - cask: greyproxy
     caveats: |
