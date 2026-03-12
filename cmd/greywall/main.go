@@ -15,6 +15,9 @@ import (
 
 	"github.com/GreyhavenHQ/greywall/internal/config"
 	"github.com/GreyhavenHQ/greywall/internal/platform"
+	"github.com/GreyhavenHQ/greywall/internal/profiles"
+	_ "github.com/GreyhavenHQ/greywall/internal/profiles/agents"     // register built-in agent profiles
+	_ "github.com/GreyhavenHQ/greywall/internal/profiles/toolchains" // register built-in toolchain profiles
 	"github.com/GreyhavenHQ/greywall/internal/proxy"
 	"github.com/GreyhavenHQ/greywall/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -40,7 +43,8 @@ var (
 	showVersion   bool
 	linuxFeatures bool
 	learning      bool
-	templateName  string
+	profileName   string
+	autoProfile   bool
 )
 
 func main() {
@@ -107,13 +111,18 @@ Configuration file format:
 	rootCmd.Flags().StringArrayVarP(&exposePorts, "port", "p", nil, "Expose port for inbound connections (can be used multiple times)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Show version information")
 	rootCmd.Flags().BoolVar(&linuxFeatures, "linux-features", false, "Show available Linux security features and exit")
-	rootCmd.Flags().BoolVar(&learning, "learning", false, "Run in learning mode: trace filesystem access and generate a config template")
-	rootCmd.Flags().StringVar(&templateName, "template", "", "Load a specific learned template by name (see: greywall templates list)")
+	rootCmd.Flags().BoolVar(&learning, "learning", false, "Run in learning mode: trace filesystem access and generate a config profile")
+	rootCmd.Flags().StringVar(&profileName, "profile", "", "Load profiles by name, comma-separated (e.g. --profile claude,uv)")
+	rootCmd.Flags().BoolVar(&autoProfile, "auto-profile", false, "Use saved or built-in profile without prompting")
+
+	// Hidden aliases for backwards compatibility
+	rootCmd.Flags().StringVar(&profileName, "template", "", "Alias for --profile (deprecated)")
+	_ = rootCmd.Flags().MarkHidden("template")
 
 	rootCmd.Flags().SetInterspersed(true)
 
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
-	rootCmd.AddCommand(newTemplatesCmd())
+	rootCmd.AddCommand(newProfilesCmd())
 	rootCmd.AddCommand(newCheckCmd())
 	rootCmd.AddCommand(newSetupCmd())
 
@@ -190,41 +199,63 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Extract command name for learned template lookup
+	// Extract command name for profile lookup
 	cmdName := extractCommandName(args, cmdString)
 
-	// Load learned template (when NOT in learning mode)
+	// Load profiles (when NOT in learning mode)
 	if !learning {
-		// Determine which template to load: --template flag takes priority
-		var templatePath string
-		var templateLabel string
-		if templateName != "" {
-			templatePath = sandbox.LearnedTemplatePath(templateName)
-			templateLabel = templateName
+		if profileName != "" {
+			// Explicit --profile flag: resolve each comma-separated name
+			names := strings.Split(profileName, ",")
+			for _, name := range names {
+				name = strings.TrimSpace(name)
+				if name == "" {
+					continue
+				}
+				resolved, err := resolveProfile(name, debug)
+				if err != nil {
+					return err
+				}
+				if resolved != nil {
+					cfg = config.Merge(cfg, resolved)
+				}
+			}
 		} else if cmdName != "" {
-			templatePath = sandbox.LearnedTemplatePath(cmdName)
-			templateLabel = cmdName
-		}
-
-		if templatePath != "" {
-			learnedCfg, loadErr := config.Load(templatePath)
+			// Auto-detect by command name
+			savedPath := sandbox.LearnedTemplatePath(cmdName)
+			savedCfg, loadErr := config.Load(savedPath)
 			switch {
 			case loadErr != nil:
 				if debug {
-					fmt.Fprintf(os.Stderr, "[greywall] Warning: failed to load learned template: %v\n", loadErr)
+					fmt.Fprintf(os.Stderr, "[greywall] Warning: failed to load saved profile: %v\n", loadErr)
 				}
-			case learnedCfg != nil:
-				cfg = config.Merge(cfg, learnedCfg)
+			case savedCfg != nil:
+				cfg = config.Merge(cfg, savedCfg)
 				if debug {
-					fmt.Fprintf(os.Stderr, "[greywall] Auto-loaded learned template for %q\n", templateLabel)
+					fmt.Fprintf(os.Stderr, "[greywall] Auto-loaded saved profile for %q\n", cmdName)
 				}
-			case templateName != "":
-				// Explicit --template but file doesn't exist
-				return fmt.Errorf("learned template %q not found at %s\nRun: greywall templates list", templateName, templatePath)
-			case cmdName != "":
-				if debug {
-					// No template found for this command - suggest creating one
-					fmt.Fprintf(os.Stderr, "[greywall] No learned template for %q. Run with --learning to create one.\n", cmdName)
+			case autoProfile:
+				// --auto-profile: silently apply built-in profile if available
+				canonical := profiles.IsKnownAgent(cmdName)
+				if canonical != "" {
+					if profile := profiles.GetAgentProfile(canonical); profile != nil {
+						if saveErr := profiles.SaveAsTemplate(profile, cmdName, debug); saveErr != nil && debug {
+							fmt.Fprintf(os.Stderr, "[greywall] Warning: could not save profile: %v\n", saveErr)
+						}
+						cfg = config.Merge(cfg, profile)
+						if debug {
+							fmt.Fprintf(os.Stderr, "[greywall] Auto-applied built-in profile for %q\n", cmdName)
+						}
+					}
+				}
+			default:
+				// No saved profile; try first-run UX for known agents
+				profileCfg, profileErr := profiles.ResolveFirstRun(cmdName, false, debug)
+				if profileErr != nil && debug {
+					fmt.Fprintf(os.Stderr, "[greywall] Warning: first-run profile error: %v\n", profileErr)
+				}
+				if profileCfg != nil {
+					cfg = config.Merge(cfg, profileCfg)
 				}
 			}
 		}
@@ -392,25 +423,59 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Generate learned template after command completes successfully.
-	// Skip template generation if the command failed — the strace trace
-	// is likely incomplete and would produce an unreliable template.
+	// Generate learned profile after command completes successfully.
+	// Skip profile generation if the command failed — the strace trace
+	// is likely incomplete and would produce an unreliable profile.
 	if learning && manager.IsLearning() {
 		if commandFailed {
-			fmt.Fprintf(os.Stderr, "[greywall] Skipping template generation: command exited with code %d\n", exitCode)
+			fmt.Fprintf(os.Stderr, "[greywall] Skipping profile generation: command exited with code %d\n", exitCode)
 		} else {
 			fmt.Fprintf(os.Stderr, "[greywall] Analyzing filesystem access patterns...\n")
-			templatePath, genErr := manager.GenerateLearnedTemplate(cmdName)
+			profilePath, genErr := manager.GenerateLearnedTemplate(cmdName)
 			if genErr != nil {
-				fmt.Fprintf(os.Stderr, "[greywall] Warning: failed to generate template: %v\n", genErr)
+				fmt.Fprintf(os.Stderr, "[greywall] Warning: failed to generate profile: %v\n", genErr)
 			} else {
-				fmt.Fprintf(os.Stderr, "[greywall] Template saved to: %s\n", templatePath)
-				fmt.Fprintf(os.Stderr, "[greywall] Next run will auto-load this template.\n")
+				fmt.Fprintf(os.Stderr, "[greywall] Profile saved to: %s\n", profilePath)
+				fmt.Fprintf(os.Stderr, "[greywall] Next run will auto-load this profile.\n")
 			}
 		}
 	}
 
 	return nil
+}
+
+// resolveProfile resolves a single profile name to a config.
+// It tries a saved profile first, then falls back to a built-in profile.
+// Returns an error if the name can't be resolved at all.
+func resolveProfile(name string, debug bool) (*config.Config, error) {
+	// Try saved profile first
+	savedPath := sandbox.LearnedTemplatePath(name)
+	savedCfg, loadErr := config.Load(savedPath)
+	if loadErr != nil {
+		if debug {
+			fmt.Fprintf(os.Stderr, "[greywall] Warning: failed to load saved profile %q: %v\n", name, loadErr)
+		}
+	}
+	if savedCfg != nil {
+		if debug {
+			fmt.Fprintf(os.Stderr, "[greywall] Loaded saved profile for %q\n", name)
+		}
+		return savedCfg, nil
+	}
+
+	// Fall back to built-in profile (agent or toolchain)
+	canonical := profiles.IsKnownAgent(name)
+	if canonical != "" {
+		profile := profiles.GetAgentProfile(canonical)
+		if profile != nil {
+			if debug {
+				fmt.Fprintf(os.Stderr, "[greywall] Using built-in profile for %q\n", name)
+			}
+			return profile, nil
+		}
+	}
+
+	return nil, fmt.Errorf("profile %q not found (no saved profile and no built-in profile)\nRun: greywall profiles list", name)
 }
 
 // extractCommandName extracts a human-readable command name from the arguments.
@@ -510,8 +575,8 @@ func runCheck(_ *cobra.Command, _ []string) error {
 		fmt.Printf("  2. Try it: greywall -- curl https://greyhaven.co\n")
 		fmt.Printf("     The request will be blocked — allow it on the dashboard, then try again\n")
 		fmt.Printf("  3. Learn a tool: greywall --learning -- opencode\n")
-		fmt.Printf("  4. Review the template: greywall templates show opencode\n")
-		fmt.Printf("  5. Run with the template: greywall -- opencode\n")
+		fmt.Printf("  4. Review the profile: greywall profiles show opencode\n")
+		fmt.Printf("  5. Run with the profile: greywall -- opencode\n")
 	}
 
 	return nil
@@ -627,62 +692,78 @@ ${fpath[1]}/_greywall for zsh, ~/.config/fish/completions/greywall.fish for fish
 	return cmd
 }
 
-// newTemplatesCmd creates the templates subcommand for managing learned templates.
-func newTemplatesCmd() *cobra.Command {
+// newProfilesCmd creates the profiles subcommand for managing sandbox profiles.
+func newProfilesCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "templates",
-		Short: "Manage learned sandbox templates",
-		Long: `List and inspect learned sandbox templates.
+		Use:     "profiles",
+		Aliases: []string{"templates"},
+		Short:   "Manage sandbox profiles",
+		Long: `List and inspect sandbox profiles.
 
-Templates are created by running greywall with --learning and are stored in:
+Profiles are created by running greywall with --learning and are stored in:
   ` + sandbox.LearnedTemplateDir() + `
 
 Examples:
-  greywall templates list            # List all learned templates
-  greywall templates show opencode   # Show the content of a template`,
+  greywall profiles list            # List all profiles
+  greywall profiles show opencode   # Show the content of a profile`,
 	}
 
 	listCmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all learned templates",
+		Short: "List all profiles",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			templates, err := sandbox.ListLearnedTemplates()
+			saved, err := sandbox.ListLearnedTemplates()
 			if err != nil {
-				return fmt.Errorf("failed to list templates: %w", err)
+				return fmt.Errorf("failed to list profiles: %w", err)
 			}
-			if len(templates) == 0 {
-				fmt.Println("No learned templates found.")
+			if len(saved) > 0 {
+				fmt.Printf("Saved profiles (%s):\n\n", sandbox.LearnedTemplateDir())
+				for _, t := range saved {
+					fmt.Printf("  %s\n", t.Name)
+				}
+				fmt.Println()
+			}
+
+			available := profiles.ListAvailableProfiles()
+			if len(available) > 0 {
+				fmt.Println("Built-in profiles (not yet saved):")
+				fmt.Println()
+				for _, a := range available {
+					fmt.Printf("  %s\n", a)
+				}
+				fmt.Println()
+			}
+
+			if len(saved) == 0 && len(available) == 0 {
+				fmt.Println("No profiles found.")
 				fmt.Printf("Create one with: greywall --learning -- <command>\n")
 				return nil
 			}
-			fmt.Printf("Learned templates (%s):\n\n", sandbox.LearnedTemplateDir())
-			for _, t := range templates {
-				fmt.Printf("  %s\n", t.Name)
-			}
-			fmt.Println()
-			fmt.Println("Show a template: greywall templates show <name>")
-			fmt.Println("Use a template:  greywall --template <name> -- <command>")
+
+			fmt.Println("Show a profile:    greywall profiles show <name>")
+			fmt.Println("Use a profile:     greywall --profile <name> -- <command>")
+			fmt.Println("Combine profiles:  greywall --profile claude,python -- claude")
 			return nil
 		},
 	}
 
 	showCmd := &cobra.Command{
 		Use:   "show <name>",
-		Short: "Show the content of a learned template",
+		Short: "Show the content of a profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			templatePath := sandbox.LearnedTemplatePath(name)
-			data, err := os.ReadFile(templatePath) //nolint:gosec // user-specified template path - intentional
+			profilePath := sandbox.LearnedTemplatePath(name)
+			data, err := os.ReadFile(profilePath) //nolint:gosec // user-specified profile path - intentional
 			if err != nil {
 				if os.IsNotExist(err) {
-					return fmt.Errorf("template %q not found\nRun: greywall templates list", name)
+					return fmt.Errorf("profile %q not found\nRun: greywall profiles list", name)
 				}
-				return fmt.Errorf("failed to read template: %w", err)
+				return fmt.Errorf("failed to read profile: %w", err)
 			}
-			fmt.Printf("Template: %s\n", name)
-			fmt.Printf("Path:     %s\n\n", templatePath)
+			fmt.Printf("Profile: %s\n", name)
+			fmt.Printf("Path:    %s\n\n", profilePath)
 			fmt.Print(string(data))
 			return nil
 		},

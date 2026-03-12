@@ -1,6 +1,6 @@
 # Greywall
 
-Greywall wraps commands in a deny-by-default sandbox. Filesystem access is restricted to the current directory by default. Use `--learning` to trace what else a command needs and auto-generate a config template. All network traffic is transparently redirected through [greyproxy](https://github.com/GreyhavenHQ/greyproxy), a deny-by-default transparent proxy with a live allow/deny dashboard. Run `greywall setup` to install greyproxy automatically.
+Greywall wraps commands in a deny-by-default sandbox. Filesystem access is restricted to the current directory by default. Use `--learning` to trace what else a command needs and auto-generate a config profile. All network traffic is transparently redirected through [greyproxy](https://github.com/GreyhavenHQ/greyproxy), a deny-by-default transparent proxy with a live allow/deny dashboard. Run `greywall setup` to install greyproxy automatically.
 
 *Supports Linux and macOS. See [platform support](docs/platform-support.md) for details.*
 
@@ -13,7 +13,7 @@ greywall check
 # Sandbox a command (network + filesystem denied by default)
 greywall -- curl https://example.com
 
-# Learn what filesystem access a command needs, then auto-generate a template
+# Learn what filesystem access a command needs, then auto-generate a profile
 greywall --learning -- opencode
 
 # Block dangerous commands
@@ -99,21 +99,55 @@ greywall check
 greywall setup
 ```
 
+### Agent profiles
+
+Greywall ships with built-in profiles for popular AI coding agents (Claude, Codex, Cursor, Aider, Goose, Gemini, OpenCode, Amp, Cline, Copilot, Kilo, Auggie, Droid) and toolchains (Node, Python, Go, Rust, Java, Ruby, Docker).
+
+On first run, greywall shows what the profile allows and lets you apply, edit, or skip:
+
+```bash
+$ greywall -- claude
+
+[greywall] Running claude in a sandbox.
+A built-in profile is available. Without it, only the current directory is accessible.
+
+Allow read:  ~/.claude  ~/.claude.json  ~/.config/claude  ~/.local/share/claude  ~/.gitconfig  ...  + working dir
+Allow write: ~/.claude  ~/.claude.json  ~/.cache/claude  ~/.config/claude  ...  + working dir
+Deny read:   ~/.ssh/id_*  ~/.gnupg/**  .env  .env.*
+Deny write:  ~/.bashrc  ~/.zshrc  ~/.ssh  ~/.gnupg
+
+[Y] Use profile (recommended)   [e] Edit first   [s] Skip (restrictive)   [n] Don't ask again
+>
+```
+
+Combine agent and toolchain profiles with `--profile`:
+
+```bash
+# Agent + Python toolchain (allows access to ~/.cache/uv, ~/.local/pipx, etc.)
+greywall --profile claude,python -- claude
+
+# Agent + multiple toolchains
+greywall --profile opencode,node,go -- opencode
+
+# List all available and saved profiles
+greywall profiles list
+```
+
 ### Learning mode
 
-Greywall can trace a command's filesystem access and generate a config template automatically:
+Greywall can trace a command's filesystem access and generate a config profile automatically:
 
 ```bash
 # Run in learning mode - traces file access via strace
 greywall --learning -- opencode
 
-# List generated templates
-greywall templates list
+# List generated profiles
+greywall profiles list
 
-# Show a template's content
-greywall templates show opencode
+# Show a profile's content
+greywall profiles show opencode
 
-# Next run auto-loads the learned template
+# Next run auto-loads the learned profile
 greywall -- opencode
 ```
 
