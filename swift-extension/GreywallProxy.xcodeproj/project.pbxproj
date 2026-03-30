@@ -1,0 +1,423 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		44CC625444775C4BB2A70C24 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D079FFE5AE6F519A7AFD9372 /* AppDelegate.swift */; };
+		628BD2D557CA3BA9F1E6ACD6 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EAEF3B146DDBF1DBCECDB8 /* main.swift */; };
+		9BA78AAB5B1D2935983C44B0 /* TransparentProxyProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB9704CA96189719C2D2F18 /* TransparentProxyProvider.swift */; };
+		AC6EB27AADEE57014762E44D /* GreywallProxyExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 2C3964E5E1907EAA983B4519 /* GreywallProxyExtension.systemextension */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		231F497810E9FCF04E2F2AE3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 829E60F32BAE3CEB4F1492B6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D9A2568262FD611BC23520F;
+			remoteInfo = GreywallProxyExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		9CFE7E2FE3CDCF3977EDE8A7 /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				AC6EB27AADEE57014762E44D /* GreywallProxyExtension.systemextension in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		164B18511ED3A440F2A4992C /* GreywallProxyExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GreywallProxyExtension.entitlements; sourceTree = "<group>"; };
+		1DB9704CA96189719C2D2F18 /* TransparentProxyProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparentProxyProvider.swift; sourceTree = "<group>"; };
+		2C3964E5E1907EAA983B4519 /* GreywallProxyExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = GreywallProxyExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
+		6403760430F25B5EBDE0D974 /* GreywallProxy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GreywallProxy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8D9862A9F547E84A7ABF1D46 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		964ADA16A4D09D58A413FE4E /* GreywallProxy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GreywallProxy.entitlements; sourceTree = "<group>"; };
+		D079FFE5AE6F519A7AFD9372 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		EC2FC3507BB25AA6679B2BF4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F0EAEF3B146DDBF1DBCECDB8 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		15F2C2E99EE3ECB15E53C0C7 = {
+			isa = PBXGroup;
+			children = (
+				B686B71BC3B3F1F80FEFFC69 /* GreywallProxy */,
+				1B061F53AF65D69B5254F45F /* GreywallProxyExtension */,
+				EB477E2BAB4396F6D93B9114 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1B061F53AF65D69B5254F45F /* GreywallProxyExtension */ = {
+			isa = PBXGroup;
+			children = (
+				164B18511ED3A440F2A4992C /* GreywallProxyExtension.entitlements */,
+				EC2FC3507BB25AA6679B2BF4 /* Info.plist */,
+				F0EAEF3B146DDBF1DBCECDB8 /* main.swift */,
+				1DB9704CA96189719C2D2F18 /* TransparentProxyProvider.swift */,
+			);
+			path = GreywallProxyExtension;
+			sourceTree = "<group>";
+		};
+		B686B71BC3B3F1F80FEFFC69 /* GreywallProxy */ = {
+			isa = PBXGroup;
+			children = (
+				D079FFE5AE6F519A7AFD9372 /* AppDelegate.swift */,
+				964ADA16A4D09D58A413FE4E /* GreywallProxy.entitlements */,
+				8D9862A9F547E84A7ABF1D46 /* Info.plist */,
+			);
+			path = GreywallProxy;
+			sourceTree = "<group>";
+		};
+		EB477E2BAB4396F6D93B9114 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6403760430F25B5EBDE0D974 /* GreywallProxy.app */,
+				2C3964E5E1907EAA983B4519 /* GreywallProxyExtension.systemextension */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4D9A2568262FD611BC23520F /* GreywallProxyExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 18569B1E16E8FC73712AA9D8 /* Build configuration list for PBXNativeTarget "GreywallProxyExtension" */;
+			buildPhases = (
+				178A899289BF1CC6A88636B0 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GreywallProxyExtension;
+			packageProductDependencies = (
+			);
+			productName = GreywallProxyExtension;
+			productReference = 2C3964E5E1907EAA983B4519 /* GreywallProxyExtension.systemextension */;
+			productType = "com.apple.product-type.system-extension";
+		};
+		70802F11EAB5387393A3E7D9 /* GreywallProxy */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F453E738FC563DECFE907AF7 /* Build configuration list for PBXNativeTarget "GreywallProxy" */;
+			buildPhases = (
+				0DA608953DB419FFC75C31FD /* Sources */,
+				9CFE7E2FE3CDCF3977EDE8A7 /* Embed System Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C0102E996F7ED988A323DA80 /* PBXTargetDependency */,
+			);
+			name = GreywallProxy;
+			packageProductDependencies = (
+			);
+			productName = GreywallProxy;
+			productReference = 6403760430F25B5EBDE0D974 /* GreywallProxy.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		829E60F32BAE3CEB4F1492B6 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					4D9A2568262FD611BC23520F = {
+						DevelopmentTeam = 838A2BPKD9;
+						ProvisioningStyle = Automatic;
+					};
+					70802F11EAB5387393A3E7D9 = {
+						DevelopmentTeam = 838A2BPKD9;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 651432FD6D06FF5DA9960AB7 /* Build configuration list for PBXProject "GreywallProxy" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 15F2C2E99EE3ECB15E53C0C7;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EB477E2BAB4396F6D93B9114 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				70802F11EAB5387393A3E7D9 /* GreywallProxy */,
+				4D9A2568262FD611BC23520F /* GreywallProxyExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0DA608953DB419FFC75C31FD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				44CC625444775C4BB2A70C24 /* AppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		178A899289BF1CC6A88636B0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9BA78AAB5B1D2935983C44B0 /* TransparentProxyProvider.swift in Sources */,
+				628BD2D557CA3BA9F1E6ACD6 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C0102E996F7ED988A323DA80 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4D9A2568262FD611BC23520F /* GreywallProxyExtension */;
+			targetProxy = 231F497810E9FCF04E2F2AE3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		30B791D11BB1D34E2FFE1E0F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 838A2BPKD9;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		3A4F15C95D6D349502317450 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GreywallProxyExtension/GreywallProxyExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = GreywallProxyExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.greywall.proxy.extension;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		67747101838E2A178760CB5F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 838A2BPKD9;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		AD776AA3A7B95386BF83DD91 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GreywallProxyExtension/GreywallProxyExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = GreywallProxyExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.greywall.proxy.extension;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		B5569DA6BCD273041D0ECFDD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = GreywallProxy/GreywallProxy.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = GreywallProxy/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.greywall.proxy;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		F478C073300CE036DB270E0A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = GreywallProxy/GreywallProxy.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = GreywallProxy/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.greywall.proxy;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		18569B1E16E8FC73712AA9D8 /* Build configuration list for PBXNativeTarget "GreywallProxyExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AD776AA3A7B95386BF83DD91 /* Debug */,
+				3A4F15C95D6D349502317450 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		651432FD6D06FF5DA9960AB7 /* Build configuration list for PBXProject "GreywallProxy" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				30B791D11BB1D34E2FFE1E0F /* Debug */,
+				67747101838E2A178760CB5F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F453E738FC563DECFE907AF7 /* Build configuration list for PBXNativeTarget "GreywallProxy" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F478C073300CE036DB270E0A /* Debug */,
+				B5569DA6BCD273041D0ECFDD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 829E60F32BAE3CEB4F1492B6 /* Project object */;
+}

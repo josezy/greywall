@@ -1,0 +1,51 @@
+name: GreywallProxy
+options:
+  deploymentTarget:
+    macOS: "12.0"
+  bundleIdPrefix: io.greywall
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: 838A2BPKD9
+
+targets:
+  GreywallProxy:
+    type: application
+    platform: macOS
+    sources:
+      - GreywallProxy
+    info:
+      path: GreywallProxy/Info.plist
+      properties:
+        LSUIElement: true
+        NSSystemExtensionUsageDescription: "Greywall needs a system extension to transparently intercept network traffic from sandboxed processes."
+    entitlements:
+      path: GreywallProxy/GreywallProxy.entitlements
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: io.greywall.proxy
+        SWIFT_VERSION: "5.9"
+    dependencies:
+      - target: GreywallProxyExtension
+        embed: true
+        codeSign: true
+
+  GreywallProxyExtension:
+    type: system-extension
+    platform: macOS
+    sources:
+      - GreywallProxyExtension
+    info:
+      path: GreywallProxyExtension/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.app-proxy
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).TransparentProxyProvider
+    entitlements:
+      path: GreywallProxyExtension/GreywallProxyExtension.entitlements
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: io.greywall.proxy.extension
+        SWIFT_VERSION: "5.9"
